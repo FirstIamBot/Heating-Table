@@ -224,75 +224,6 @@ void controler_loop(void){
   
 }
 
-void rotary_loop(void)
-{
-	//dont print anything unless value changed
-	if (rotaryEncoder.encoderChanged())
-	{
-    if(State == 0){
-      return;
-    }
-    if(State == 1){
-      Encpos = rotaryEncoder.readEncoder();
-      Curr_Temp = Encpos;
-    }
-    if(State == 2){
-      Current_pos = rotaryEncoder.readEncoder();
-    }
-	}
-	if (rotaryEncoder.isEncoderButtonClicked())
-	{
-		rotary_onButtonClick();
-	}
-}
-
-void rotary_onButtonClick(void)
-{
-	static unsigned long lastTimePressed = 0;
-	//ignore multiple press in that time milliseconds
-  if ((millis() - lastTimePressed) < 500 )
-	{
-		return;
-	}
-
-		Button = SHORT_PRESS;
-    switch (State)
-    {
-    case STANDBAY:/* constant-expression */
-      State |= HEATING;
-      break;
-    case HEATING:/* constant-expression */
-      State |= MANUAL_HEATING;
-      break;
-    case MANUAL_HEATING:/* constant-expression */
-      State = PROG_HEATING;
-      break;
-    case PROG_HEATING:/* constant-expression */
-      State = SETTING;
-      break;
-    case SETTING:/* constant-expression */
-      State = STANDBAY;
-      break;     
-    default:
-      break;
-    }
-	lastTimePressed = millis();
-}
-
-bool temp_loop(void){
-  static float lastTemp;
-	static unsigned long lastTempUpdate = 0;
-  
-	// Плавное отображение(вывод) изменения температуры
-	if (millis() - lastTempUpdate > TEMP_READ_DELAY)
-	{
-    Measured_Temp = thermocouple.readCelsius();
-    lastTempUpdate = millis();
-		return true;
-	}
-  return false;
-}
-
 bool temp_loop_pntr(double *temperature){
   static float lastTemp;
 	static unsigned long lastTempUpdate = 0;
@@ -324,38 +255,6 @@ void DisplayTemp(int16_t x, int16_t y, double *temp){
     lastLCDUpdate = millis();
   }
 }
-
-void DisplayTempEncoder(int16_t x, int16_t y, int32_t EncPosition, float Tmp){
-  static char outstr[6];
-
-  display.clearDisplay();
-  //********************************************************
-  display.setFont(&FreeMono9pt7b);
-  display.setTextSize(1);
-  display.setTextColor(WHITE);
-  display.setCursor(x, y);
-  display.print("Pos=");
-  display.print(String((int32_t)EncPosition));
-  display.print("S=");
-  display.print(String((int8_t)State));
-  //*********************************************************
-  display.setFont(&FreeSerif12pt7b);
-  display.setTextSize(1);
-  display.setTextColor(WHITE);
-  display.setCursor(x+30, y+30);
-  display.print(dtostrf(Tmp,4, 2, outstr));
-  display.print(" C '");
-  //display.display();
-    //*********************************************************
-  display.setFont(&FreeMono9pt7b);
-  display.setTextSize(1);
-  display.setTextColor(WHITE);
-  display.setCursor(x+50, y+20);
-  display.print(dtostrf(Tmp,4, 2, outstr));
-  display.print("B=");
-  display.print(String((int8_t)Button));
-  display.display();
- }
 
 void DislayLogo(void){
         display.clearDisplay();
