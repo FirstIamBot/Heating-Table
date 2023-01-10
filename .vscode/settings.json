@@ -10,6 +10,10 @@
         "initializer_list": "cpp",
         "memory": "cpp",
         "random": "cpp",
-        "optional": "cpp"
+        "optional": "cpp",
+        "draw.h": "c",
+        "adafruit_gfx.h": "c",
+        "freeserif12pt7b.h": "c",
+        "adafruit_ssd1306.h": "c"
     }
 }
