@@ -100,9 +100,9 @@ void read_encoder() // In this function we read the encoder data and increment t
     if ( millis() - debounce > 80) { //debounce delay
       encoder_btn_count++; // Increment the values 
       if (encoder_btn_count > 2) encoder_btn_count = 1;
-#ifdef __DEBUG__
-      Serial.println(encoder_btn_count);
-#endif
+      #ifdef __DEBUG__
+        Serial.println(encoder_btn_count);
+      #endif
     }
     debounce = millis(); // update the time variable
   }

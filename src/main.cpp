@@ -12,7 +12,8 @@
 #include "max6675.h"
 #include <AiEsp32RotaryEncoder.h>
 #include <RBDdimmer.h>
-#include <PID_v1.h>
+#include <PIDController.h>
+//#include <PID_v1.h>
 //#include < AiEsp32RotaryEncoderNumberSelector.h>
 #include "image.h"
 #include "main.h"
@@ -41,14 +42,17 @@ int8_t State;//
 int8_t Current_pos;
 int8_t Select_pos;
 
-double Temperature, Measured_Temp, Curr_Temp, SetPoint, OutputVal;
+double Temperature, Measured_Temp, Curr_Temp, SetPoint, OutputVal, valComputePID;
 //********************************************************************
 void DislayLogo(void);
-uint8_t rotary_EncoderButton(void);
+
+bool temp_loop_pntr(double *temperature);
+void model_loop(void);
 
 void DisplayTemp(int16_t x, int16_t y, double *temp);
-bool temp_loop_pntr(double *temperature);
-bool loop_GUI(double *temperature, uint32_t epcos);
+bool loop_GUI(double *temperature);
+
+uint8_t rotary_EncoderButton(void);
 void controler_loop(void);
 //********************************************************************
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
@@ -60,8 +64,8 @@ AiEsp32RotaryEncoder rotaryEncoder = AiEsp32RotaryEncoder(
                     ROTARY_ENCODER_STEPS);
 MAX6675 thermocouple(MAX6675_CLK, MAX6675_CS, MAX6675_DO);
 dimmerLamp TableHeat(OUTPUT_PIN, ZEROCROSS); //initialase port for dimmer for ESP8266, ESP32, Arduino due boards
-
-PID TableHeatPID(&Measured_Temp, &OutputVal, &SetPoint, Kp, Ki, Kd, AUTOMATIC);
+PIDController TableHeatPID; // Create an instance of the PID controller class, called "pid"
+//PID TableHeatPID(&Measured_Temp, &OutputVal, &SetPoint, Kp, Ki, Kd, AUTOMATIC);
 //***********************************************************************
 void IRAM_ATTR readEncoderISR()
 {
@@ -97,10 +101,11 @@ void setup() {
   // ***************************    PID regulator    **************************
   //set point 100% or 400 Celsium
   SetPoint = 400;
-  TableHeatPID.SetOutputLimits(0, 100);
+  TableHeatPID.begin();           // initialize the PID instance
+  TableHeatPID.setpoint(SetPoint);// The "goal" the PID controller tries to "reach"
+  TableHeatPID.tune(Kp, Kd, Ki);  // Tune the PID, arguments: kP, kI, kD
+  TableHeatPID.limit(0, 100);    // Limit the PID output between 0 and 255, this is important to get rid of integral windup!
   //set PID update interval to 1000ms  
-  TableHeatPID.SetSampleTime(1000);
-  TableHeatPID.SetMode(AUTOMATIC);
   Serial.println("PID regulator init");
   // ***************************    RBD dimmer    **************************
   TableHeat.begin(NORMAL_MODE, ON); //dimmer initialisation: name.begin(MODE, STATE) 
@@ -113,37 +118,14 @@ void setup() {
 }
 //***********************************************************************
 void loop() {
-  static char outstr[6];
-  bool bComputePID;
 
-  temp_loop_pntr(&Measured_Temp);// измерение температуры
-
+  model_loop();
   controler_loop();// управление режимами
-  //вывод на OLED температуры измереной или устанволеной
-  if(Mode&CUR_MES){ 
-    //Serial.print(" Curr_Temp=");
-    //Serial.println(String(Curr_Temp, DEC));
-    Temperature = Curr_Temp;
-  }
-  else{
-    Temperature = Measured_Temp;
-  }
-  //***********  Управление температурой PID контролером и Dimmer *****************
-  if(State&HEATING){ //
-    bComputePID = TableHeatPID.Compute();
-    
-    Serial.print(" OutputVal=");
-    Serial.println(dtostrf(OutputVal, 6, 0, outstr));
-    Serial.print(" x=");
-    Serial.println(String(bComputePID, BIN));
-
-    TableHeat.setPower(int(OutputVal));
-  }    
   // вывод на OLED
-  loop_GUI(&Temperature, Encpos); 
+  loop_GUI(&Temperature); 
   // вывод на WiFI
-  loopWIFI();
-  
+  //loopWIFI();
+  server.handleClient();        // manage HTTP requests
 }
 //########################################################################################
 void controler_loop(void){
@@ -167,6 +149,7 @@ void controler_loop(void){
       Mode |= CUR_MES;       // Установка флага вывода выбранной(ручной) температуры 
       State &= ~HEATING;     // Выключение нагревателя
       Curr_Temp = rotaryEncoder.readEncoder();// чтение энкодера в выбраную температуру
+      TableHeatPID.setpoint(Curr_Temp);
     }
     if(Mode & PROG_HEATING){
       Current_pos = rotaryEncoder.readEncoder();
@@ -183,37 +166,50 @@ void controler_loop(void){
   // действия на нажатие кнопки енкодера в разных режимах
   button = rotary_EncoderButton();
   if(button){
-    //Serial.print(" button=");
-    //Serial.println(String(button, BIN));
-    //Serial.print(" Mode=");
-    //Serial.println(String(Mode, BIN));
+    State &= ~HEATING;     // Выключение нагревателя
+    #ifdef __DEBUG__
+      Serial.print(" button=");
+      Serial.println(String(button, BIN));
+      //Serial.print(" Mode=");
+      //Serial.println(String(Mode, BIN));
+    #endif
     // Выбор режимов роботы Heating Table
     // Короткое нажатие кнопки
     if(button & SHORT_PRESS){
       if(Mode == STANDBAY){
         Mode &= ~STANDBAY;
         Mode |= MANUAL_HEATING;
-        Serial.println("Mode == MANUAL_HEATING");
+        #ifdef __DEBUG__
+          Serial.println("Mode == MANUAL_HEATING");
+        #endif
       }
       else if(Mode & MANUAL_HEATING){
         Mode &= ~MANUAL_HEATING;
         Mode |= PROG_HEATING;
-        Serial.println("Mode == PROG_HEATING");
+        #ifdef __DEBUG__
+          Serial.println("Mode == PROG_HEATING");
+        #endif
       }
       else if(Mode & PROG_HEATING){
         Mode &= ~PROG_HEATING;
         Mode |= SETTING;
-        Serial.println("Mode == SETTING");
+        #ifdef __DEBUG__
+          Serial.println("Mode == SETTING");
+        #endif
       }
       else if(Mode & SETTING){
         Mode &= ~SETTING;
         Mode |= STANDBAY;
-        Serial.println("Mode == STANDBAY");
+        #ifdef __DEBUG__
+          Serial.println("Mode == STANDBAY");
+        #endif
       }
     }
     // Длинное нажатие кнопки
     if(button & LONG_PRESS){
-        Serial.println("A detected is LONG press in controler_loop");
+        #ifdef __DEBUG__
+          Serial.println("A detected is LONG press in controler_loop");
+        #endif
     }
   }
   // myflags |= option4; // включаем option4  
@@ -224,6 +220,7 @@ void controler_loop(void){
   //  {
   //      value &= ~myflags; clear
   //  }
+
   //**** Сброс бита для вывода устанавливаемой температуры через 3 сек *********
   if((Mode&CUR_MES) && (millis()-lastTimeWait > GUI_TIME_DELAY)){
     Mode &= ~CUR_MES; // переключения на вывод измеренной температуры
@@ -232,6 +229,7 @@ void controler_loop(void){
   }
 }
 
+//########################################################################################
 bool temp_loop_pntr(double *temperature){
   static float lastTemp;
 	static unsigned long lastTempUpdate = 0;
@@ -245,6 +243,44 @@ bool temp_loop_pntr(double *temperature){
 	}
   return false;
 }
+
+
+void model_loop(void){
+
+  temp_loop_pntr(&Measured_Temp);// измерение температуры
+  //вывод на OLED температуры измереной или устанволеной
+  if(Mode&CUR_MES){ 
+    Temperature = Curr_Temp;
+  }
+  else{
+    Temperature = Measured_Temp;
+  }
+  //***********  Управление температурой PID контролером и Dimmer *****************
+  if(State&HEATING){ //
+
+    valComputePID = TableHeatPID.compute(Measured_Temp);
+    #ifdef __DEBUG__
+      Serial.print("Measured_Temp = ");
+      Serial.println(String(Measured_Temp, DEC));
+      Serial.print("Curr_Temp = ");
+      Serial.println(String(Curr_Temp, DEC));
+      Serial.print("valComputePID = ");
+      Serial.println(String(int(valComputePID), DEC));
+    #endif
+    TableHeat.setPower(int(valComputePID));
+  }  
+  else if(State&PROG_HEATING){ //
+
+    //valComputePID = TableHeatPID.compute(Measured_Temp);
+    #ifdef __DEBUG__
+      Serial.print("MODEL ****** PROG_HEATING ");
+    #endif
+    //TableHeat.setPower(int(valComputePID));
+  }  
+
+}
+
+//########################################################################################
  
 void DisplayTemp(int16_t x, int16_t y, double *temp){
   static char outstr[6];
@@ -277,7 +313,7 @@ void DislayLogo(void){
         delay(3000);
 }
 
-bool loop_GUI(double *temperature, uint32_t epcos){
+bool loop_GUI(double *temperature){
 
 	static unsigned long lastGUIUpdate = 0;
   static char outstr[6];
@@ -305,7 +341,7 @@ bool loop_GUI(double *temperature, uint32_t epcos){
         display.drawBitmap(5, 20, epd_bitmap_up, 20, 36, WHITE); // заменить 36 на 40
         display.drawBitmap(110, 20, epd_bitmap_down, 20, 36, WHITE);        
       }
-      else if(State&HEATING){
+      else if(State&HEATING && (Measured_Temp - Curr_Temp < 3 )){
         display.drawBitmap(5, 20, epd_bitmap_heating_table, 22, 21, WHITE);// подобрать 22,21
       }
       DisplayTemp(30, 40, temperature); 
@@ -334,6 +370,7 @@ bool loop_GUI(double *temperature, uint32_t epcos){
   return false;
  }
 
+//########################################################################################
 uint8_t rotary_EncoderButton(void){
 
     unsigned long  pressDuration;
@@ -344,11 +381,15 @@ uint8_t rotary_EncoderButton(void){
      // return NOT_PRESS;
    //}
    if( (SHORT_PRESS_TIME < pressDuration) && (LONG_PRESS_TIME > pressDuration ) ){
-      //Serial.println("A SHORT press is detected");
+      #ifdef __DEBUG__
+        Serial.println("A SHORT press is detected");
+      #endif
       return SHORT_PRESS;
     }
     if( LONG_PRESS_TIME < pressDuration){
-      //Serial.println("A detected is LONG press ");
+      #ifdef __DEBUG__
+        Serial.println("A LONG_PRESS is detected");
+      #endif
       return LONG_PRESS;      
     }
     return NOT_PRESS;
