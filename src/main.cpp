@@ -12,8 +12,8 @@
 #include "max6675.h"
 #include <AiEsp32RotaryEncoder.h>
 #include <RBDdimmer.h>
-#include <PIDController.h>
-//#include <PID_v1.h>
+//#include <PIDController.h>
+#include <PID_v1.h>
 //#include < AiEsp32RotaryEncoderNumberSelector.h>
 #include "image.h"
 #include "main.h"
@@ -64,8 +64,8 @@ AiEsp32RotaryEncoder rotaryEncoder = AiEsp32RotaryEncoder(
                     ROTARY_ENCODER_STEPS);
 MAX6675 thermocouple(MAX6675_CLK, MAX6675_CS, MAX6675_DO);
 dimmerLamp TableHeat(OUTPUT_PIN, ZEROCROSS); //initialase port for dimmer for ESP8266, ESP32, Arduino due boards
-PIDController TableHeatPID; // Create an instance of the PID controller class, called "pid"
-//PID TableHeatPID(&Measured_Temp, &OutputVal, &SetPoint, Kp, Ki, Kd, AUTOMATIC);
+//PIDController TableHeatPID; // Create an instance of the PID controller class, called "pid"
+PID TableHeatPID(&Measured_Temp, &OutputVal, &SetPoint, Kp, Ki, Kd, AUTOMATIC);
 //***********************************************************************
 void IRAM_ATTR readEncoderISR()
 {
@@ -101,11 +101,14 @@ void setup() {
   // ***************************    PID regulator    **************************
   //set point 100% or 400 Celsium
   SetPoint = 400;
+  /*
   TableHeatPID.begin();           // initialize the PID instance
   TableHeatPID.setpoint(SetPoint);// The "goal" the PID controller tries to "reach"
   TableHeatPID.tune(Kp, Kd, Ki);  // Tune the PID, arguments: kP, kI, kD
   TableHeatPID.limit(0, 100);    // Limit the PID output between 0 and 255, this is important to get rid of integral windup!
-  //set PID update interval to 1000ms  
+  */
+  //set PID update interval to 1000ms 
+  TableHeatPID.SetSampleTime(500); 
   Serial.println("PID regulator init");
   // ***************************    RBD dimmer    **************************
   TableHeat.begin(NORMAL_MODE, ON); //dimmer initialisation: name.begin(MODE, STATE) 
@@ -149,7 +152,8 @@ void controler_loop(void){
       Mode |= CUR_MES;       // Установка флага вывода выбранной(ручной) температуры 
       State &= ~HEATING;     // Выключение нагревателя
       Curr_Temp = rotaryEncoder.readEncoder();// чтение энкодера в выбраную температуру
-      TableHeatPID.setpoint(Curr_Temp);
+      //TableHeatPID.setpoint(Curr_Temp);
+      SetPoint = Curr_Temp;
     }
     if(Mode & PROG_HEATING){
       Current_pos = rotaryEncoder.readEncoder();
@@ -258,7 +262,8 @@ void model_loop(void){
   //***********  Управление температурой PID контролером и Dimmer *****************
   if(State&HEATING){ //
 
-    valComputePID = TableHeatPID.compute(Measured_Temp);
+    //valComputePID = TableHeatPID.compute(Measured_Temp);
+    valComputePID = TableHeatPID.Compute();
     #ifdef __DEBUG__
       Serial.print("Measured_Temp = ");
       Serial.println(String(Measured_Temp, DEC));
@@ -267,7 +272,8 @@ void model_loop(void){
       Serial.print("valComputePID = ");
       Serial.println(String(int(valComputePID), DEC));
     #endif
-    TableHeat.setPower(int(valComputePID));
+    //TableHeat.setPower(int(valComputePID));
+    TableHeat.setPower(int(OutputVal));
   }  
   else if(State&PROG_HEATING){ //
 

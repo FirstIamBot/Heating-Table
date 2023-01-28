@@ -16,7 +16,7 @@ WebServer server(80);
 String header;
 String str, json;
 
-extern double Measured_Temp, Curr_Temp, valComputePID;
+extern double Measured_Temp, Curr_Temp, valComputePID, OutputVal;
 
 extern int8_t Mode;
 extern int8_t State;
@@ -101,6 +101,7 @@ void status(void){
 }
 
 void pid(void){
-    json = "{\"varComputePID\": \"" + String(valComputePID) + "\"}";
+    //json = "{\"varComputePID\": \"" + String(valComputePID) + "\"}";
+    json = "{\"varComputePID\": \"" + String(OutputVal) + "\"}";
     server.send (200, "text/json", json);// send JSON text to client
 }
