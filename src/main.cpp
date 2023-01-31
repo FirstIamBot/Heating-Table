@@ -1,14 +1,9 @@
 #include <Arduino.h>
 // Load Wi-Fi library
 #include "wifi.h"
+#include "display.h"
 
 #include <Wire.h>
-#include <Adafruit_GFX.h>
-//#include <Fonts/FreeMonoBoldOblique12pt7b.h>
-#include <Fonts/FreeSerif9pt7b.h>
-#include <Fonts/FreeSerif12pt7b.h>
-#include <Fonts/FreeMono9pt7b.h>
-#include <Adafruit_SSD1306.h>
 #include "max6675.h"
 #include <AiEsp32RotaryEncoder.h>
 #include <RBDdimmer.h>
@@ -27,35 +22,57 @@ int64_t Encpos;
 int8_t Button;
 //***********  mode reg (Режим роботы нагревательного стола ) **************************
 //    7     6      5       4       3       2              1          0
-// |     |     |CUR_MES|       |SETTING|PROG_HEATING|MANUAL_HEATING|STANDBAY|
+// |     |     | PROG1 | PROG0 |SETTING|PROG_HEATING|MANUAL_HEATING|STANDBAY|
 //
 //********************************************************************
 int8_t Mode;
 
 //***********  status mode reg (Статус нагревательного стола ) ****************
 //    7     6     5     4     3     2      1      0
-// |     |     |     |     |     |     |      |HEATING|
+// |     |     |     |     |     |     |CUR_MES|HEATING|
 //
 //********************************************************************
 int8_t State;//
 
-int8_t Current_pos;
-int8_t Select_pos;
+int8_t Current_pos = 0;
+int8_t Select_pos = 0;
+int8_t index_pos = 0;
 
 double Temperature, Measured_Temp, Curr_Temp, SetPoint, OutputVal, valComputePID;
+// array temperature on time for programing heating
+int16_t Prog0[4][2]={{50, 125},{120, 125},{210, 235},{240, 0}};// SnPb
+int16_t Prog1[4][2]={{50, 175},{180, 175},{210, 260},{240, 0}};// Pb-free
+
+typedef struct 
+{
+
+	uint8_t id;
+	uint8_t num_selections;
+	String  Str;
+  uint8_t XPOS;
+  uint8_t YPOS;
+	uint8_t (*function)(int);
+	uint8_t *fn_arg;
+} menu; 
+
+menu prog[2][1]={
+  {0, 0, "PROG 1", 25, 24, 0, (uint8_t*)Prog0},
+  {1, 1, "PROG 2", 25, 48, 0, (uint8_t*)Prog1},
+};
+
+void DisplayMenu(menu *Menu);
 //********************************************************************
-void DislayLogo(void);
+
 
 bool temp_loop_pntr(double *temperature);
 void model_loop(void);
 
-void DisplayTemp(int16_t x, int16_t y, double *temp);
 bool loop_GUI(double *temperature);
 
 uint8_t rotary_EncoderButton(void);
 void controler_loop(void);
 //********************************************************************
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+//Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 AiEsp32RotaryEncoder rotaryEncoder = AiEsp32RotaryEncoder(
                     ROTARY_ENCODER_A_PIN, \
                     ROTARY_ENCODER_B_PIN, \
@@ -74,14 +91,7 @@ void IRAM_ATTR readEncoderISR()
 //***********************************************************************
 void setup() {
   Serial.begin(115200);
-  // Start I2C Communication SDA = 5 and SCL = 4 on Wemos Lolin32 ESP32 with built-in SSD1306 OLED
-  //*****************************    SSD1306 OLED    ********************
-  Wire.begin(SDA, SCL);
-  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C, false, false)) {
-    Serial.println(F("SSD1306 allocation failed"));
-    for(;;);
-  }
-  Serial.println("SSD1306 init");
+  initDisplay();
   DislayLogo();
   //*****************************    max6675    *************************
   Serial.println("MAX6675 init");
@@ -118,10 +128,10 @@ void setup() {
   Mode =0 ;
   State= 0;
   initWIFI();
+
 }
 //***********************************************************************
 void loop() {
-
   model_loop();
   controler_loop();// управление режимами
   // вывод на OLED
@@ -149,14 +159,18 @@ void controler_loop(void){
       return;
     }
     if(Mode & MANUAL_HEATING){
-      Mode |= CUR_MES;       // Установка флага вывода выбранной(ручной) температуры 
+      State |= CUR_MES;       // Установка флага вывода выбранной(ручной) температуры 
       State &= ~HEATING;     // Выключение нагревателя
       Curr_Temp = rotaryEncoder.readEncoder();// чтение энкодера в выбраную температуру
       //TableHeatPID.setpoint(Curr_Temp);
       SetPoint = Curr_Temp;
     }
     if(Mode & PROG_HEATING){
-      Current_pos = rotaryEncoder.readEncoder();
+      Current_pos = rotaryEncoder.encoderChanged();
+      Serial.println(String(Current_pos));
+//*********************************************************
+
+//*********************************************************
     }
     if(Mode & SETTING){
       Current_pos = rotaryEncoder.encoderChanged();
@@ -195,6 +209,9 @@ void controler_loop(void){
         #endif
       }
       else if(Mode & PROG_HEATING){
+//*********************************************************
+
+//*********************************************************
         Mode &= ~PROG_HEATING;
         Mode |= SETTING;
         #ifdef __DEBUG__
@@ -226,8 +243,8 @@ void controler_loop(void){
   //  }
 
   //**** Сброс бита для вывода устанавливаемой температуры через 3 сек *********
-  if((Mode&CUR_MES) && (millis()-lastTimeWait > GUI_TIME_DELAY)){
-    Mode &= ~CUR_MES; // переключения на вывод измеренной температуры
+  if((State&CUR_MES) && (millis()-lastTimeWait > GUI_TIME_DELAY)){
+    State &= ~CUR_MES; // переключения на вывод измеренной температуры
     State |= HEATING; // Включение нагревателя
     lastTimeWait = millis();
   }
@@ -253,17 +270,36 @@ void model_loop(void){
 
   temp_loop_pntr(&Measured_Temp);// измерение температуры
   //вывод на OLED температуры измереной или устанволеной
-  if(Mode&CUR_MES){ 
+  if(State&CUR_MES){ 
     Temperature = Curr_Temp;
   }
   else{
     Temperature = Measured_Temp;
   }
   //***********  Управление температурой PID контролером и Dimmer *****************
-  if(State&HEATING){ //
 
+  if(Mode&MANUAL_HEATING){
     //valComputePID = TableHeatPID.compute(Measured_Temp);
     valComputePID = TableHeatPID.Compute();
+    #ifdef __DEBUG__
+      Serial.println("MODEL ****** MANUAL_HEATING *** model_loop");
+    #endif    
+  } 
+  else if(Mode&PROG_HEATING){ //
+//*********************************************************
+
+//*********************************************************
+    /*
+    #ifdef __DEBUG__
+      Serial.print("MODEL ****** PROG_HEATING ");
+    #endif    
+    */
+    TableHeatPID.Compute();
+    valComputePID = OutputVal;
+    
+    //valComputePID = TableHeatPID.compute(Measured_Temp);
+  }  
+  else if(State&HEATING){ //
     #ifdef __DEBUG__
       Serial.print("Measured_Temp = ");
       Serial.println(String(Measured_Temp, DEC));
@@ -274,49 +310,7 @@ void model_loop(void){
     #endif
     //TableHeat.setPower(int(valComputePID));
     TableHeat.setPower(int(OutputVal));
-  }  
-  else if(State&PROG_HEATING){ //
-
-    //valComputePID = TableHeatPID.compute(Measured_Temp);
-    #ifdef __DEBUG__
-      Serial.print("MODEL ****** PROG_HEATING ");
-    #endif
-    //TableHeat.setPower(int(valComputePID));
-  }  
-
-}
-
-//########################################################################################
- 
-void DisplayTemp(int16_t x, int16_t y, double *temp){
-  static char outstr[6];
-  static unsigned long lastLCDUpdate;
-
-	if (millis() - lastLCDUpdate > 500)
-	{
-    //display.clearDisplay();
-    display.setFont(&FreeSerif12pt7b);
-    display.setTextSize(1);
-    display.setTextColor(WHITE);
-    display.setCursor(x, y);
-    display.print(dtostrf(*temp ,4, 2, outstr));
-    //display.print(" C");
-    display.display();
-    lastLCDUpdate = millis();
-  }
-}
-
-void DislayLogo(void){
-        display.clearDisplay();
-        display.setFont(&FreeSerif12pt7b);
-        display.setTextSize(1);
-        display.setTextColor(WHITE);
-        display.setCursor(20, 20);
-        display.print("Heating");
-        display.setCursor(30, 40);
-        display.print("Table");
-        display.display();
-        delay(3000);
+  } 
 }
 
 bool loop_GUI(double *temperature){
@@ -339,11 +333,11 @@ bool loop_GUI(double *temperature){
       DisplayTemp(25, 25, temperature);  
     }
     if(Mode & MANUAL_HEATING){
-      display.setFont(&FreeSerif9pt7b);
+      //display.setFont(&FreeSerif9pt7b);
       display.setTextSize(1);
       display.setTextColor(WHITE);
       // Выбор стрелок или нагревания 
-      if(Mode&CUR_MES){  
+      if(State&CUR_MES){  
         display.drawBitmap(5, 20, epd_bitmap_up, 20, 36, WHITE); // заменить 36 на 40
         display.drawBitmap(110, 20, epd_bitmap_down, 20, 36, WHITE);        
       }
@@ -353,13 +347,15 @@ bool loop_GUI(double *temperature){
       DisplayTemp(30, 40, temperature); 
     }
     if(Mode & PROG_HEATING){
+      /*
       display.setFont(&FreeSerif9pt7b);
       display.setTextSize(1);
       display.setTextColor(WHITE);
       display.setCursor(25, 15);
-      display.print("Prog_heating");
-
-      DisplayTemp(25, 55, temperature); 
+      display.print("Prog_heating");     
+      */
+      DisplayMenu(*prog);
+      //DisplayTemp(25, 55, temperature); 
     }
     if(Mode & SETTING){
       display.setFont(&FreeSerif9pt7b);
@@ -399,4 +395,48 @@ uint8_t rotary_EncoderButton(void){
       return LONG_PRESS;      
     }
     return NOT_PRESS;
+}
+
+//#################### Menu  function View, Controler #############################
+ 
+void DisplayMenu(menu *Menu){
+    int selection_num=0;
+    
+    display.setFont(&FreeSerif12pt7b);
+    display.setTextSize(1);
+    display.setTextColor(WHITE);
+    
+    for(selection_num=0; selection_num <= Menu[selection_num].num_selections; selection_num ++){// Вывод меню на экран
+      if(Current_pos == Menu[selection_num].num_selections){    // Вывод курсора на экран
+        display.setCursor(Menu[selection_num].XPOS-14, Menu[selection_num].YPOS);
+        display.print(">");
+      }
+      display.setCursor(Menu[selection_num].XPOS, Menu[selection_num].YPOS);
+      display.print(Menu[selection_num].Str);
+      Serial.println(Menu[selection_num].Str);
+    }
+    display.display();
+}
+
+void ControlerMenu(menu *Menu, int8_t *mode, int8_t *state, int8_t *cur_pos){
+
+
+}
+
+void ModelMenu(menu *Menu, int8_t *mode, int8_t *state, int8_t *cur_pos){
+    unsigned long ProgHeatingMillis = millis();
+
+    if((millis() - ProgHeatingMillis) < 90){
+
+    }
+    if(90<(millis() - ProgHeatingMillis) < 180){
+      
+    }
+    if(180<(millis() - ProgHeatingMillis) < 210){
+      
+    }
+    if(210<(millis() - ProgHeatingMillis)){
+      
+    }
+
 }

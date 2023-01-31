@@ -1,8 +1,5 @@
 // Load Wi-Fi library
-#include <WiFi.h>
-#include <WebServer.h>        // include ESP32 library
-#include "webpage/index.h"
-#include "webpage/dbg.h"
+
 #include "main.h"
 
 // Replace with your network credentials

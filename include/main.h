@@ -1,15 +1,30 @@
 #ifndef _MAIN_H_
 #define _MAIN_H_
+
+#include <Adafruit_GFX.h>
+#include <Fonts/Picopixel.h>
+#include <Fonts/FreeSerif9pt7b.h>
+#include <Fonts/FreeSerif12pt7b.h>
+#include <Fonts/FreeMono9pt7b.h>
+#include <Adafruit_SSD1306.h>
+
+#include <WiFi.h>
+#include <WebServer.h>        // include ESP32 library
+#include "webpage/index.h"
+#include "webpage/dbg.h"
+
 //*************************  MODE and State working HEAT_TABLE ******************************
 // MODE FLAG's
 #define STANDBAY 0          // режим ожидания
 #define MANUAL_HEATING 1    // режим ручной установка температуры
 #define PROG_HEATING   2    // режим установки температуры по программе
 #define SETTING  4          // настройка
+#define PROG0    8          // SnPb      свинцовый припой
+#define PROG1   16          // Pb-free   безсвинцовый припой
 
-#define CUR_MES 16  // Флаг вывода температуры: 0 - измереная, 1 - установленая(ручная)
 // State FLAG's
 #define HEATING 1   // включение нагрева стола
+#define CUR_MES 2  // Флаг вывода температуры: 0 - измереная, 1 - установленая(ручная)
 
 //#define HEATING_ON  1
 //#define HEATING_OFF 0
