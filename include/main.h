@@ -25,6 +25,7 @@
 // State FLAG's
 #define HEATING 1   // включение нагрева стола
 #define CUR_MES 2  // Флаг вывода температуры: 0 - измереная, 1 - установленая(ручная)
+#define Entrer  4
 
 //#define HEATING_ON  1
 //#define HEATING_OFF 0
