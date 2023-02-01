@@ -7,9 +7,8 @@
 #include "max6675.h"
 #include <AiEsp32RotaryEncoder.h>
 #include <RBDdimmer.h>
-//#include <PIDController.h>
+#include <PIDController.h>
 #include <PID_v1.h>
-//#include < AiEsp32RotaryEncoderNumberSelector.h>
 #include "image.h"
 #include "main.h"
 
@@ -21,7 +20,7 @@
 int64_t Encpos;
 int8_t Button;
 //***********  mode reg (Режим роботы нагревательного стола ) **************************
-//    7     6      5       4       3       2              1          0
+//    7     6      5       4       3          2            1           0
 // |     |     | PROG1 | PROG0 |SETTING|PROG_HEATING|MANUAL_HEATING|STANDBAY|
 //
 //********************************************************************
@@ -38,14 +37,13 @@ int8_t Current_pos = 0;
 int8_t Select_pos = 0;
 int8_t index_pos = 0;
 
-double Temperature, Measured_Temp, Curr_Temp, SetPoint, OutputVal, valComputePID;
+double Temperature, Measured_Temp, Curr_Temp, valComputePID;
 // array temperature on time for programing heating
 int16_t Prog0[4][2]={{50, 125},{120, 125},{210, 235},{240, 0}};// SnPb
 int16_t Prog1[4][2]={{50, 175},{180, 175},{210, 260},{240, 0}};// Pb-free
 
 typedef struct 
 {
-
 	uint8_t id;
 	uint8_t num_selections;
 	String  Str;
@@ -56,14 +54,12 @@ typedef struct
 } menu; 
 
 menu prog[2][1]={
-  {0, 0, "PROG 1", 25, 24, 0, (uint8_t*)Prog0},
-  {1, 1, "PROG 2", 25, 48, 0, (uint8_t*)Prog1},
+  {0, 1, "PROG 1", 25, 24, 0, (uint8_t*)Prog0},
+  {1, 2, "PROG 2", 25, 48, 0, (uint8_t*)Prog1},
 };
 
 void DisplayMenu(menu *Menu);
 //********************************************************************
-
-
 bool temp_loop_pntr(double *temperature);
 void model_loop(void);
 
@@ -82,7 +78,7 @@ AiEsp32RotaryEncoder rotaryEncoder = AiEsp32RotaryEncoder(
 MAX6675 thermocouple(MAX6675_CLK, MAX6675_CS, MAX6675_DO);
 dimmerLamp TableHeat(OUTPUT_PIN, ZEROCROSS); //initialase port for dimmer for ESP8266, ESP32, Arduino due boards
 //PIDController TableHeatPID; // Create an instance of the PID controller class, called "pid"
-PID TableHeatPID(&Measured_Temp, &OutputVal, &SetPoint, Kp, Ki, Kd, AUTOMATIC);
+PID TableHeatPID(&Measured_Temp, &valComputePID, &Curr_Temp, Kp, Ki, Kd, DIRECT);
 //***********************************************************************
 void IRAM_ATTR readEncoderISR()
 {
@@ -97,6 +93,7 @@ void setup() {
   Serial.println("MAX6675 init");
   // wait for MAX chip to stabilize
   delay(200);
+  temp_loop_pntr(&Curr_Temp);// измерение температуры запись начального значения температуры
   //****************************    rotaryEncoder    *********************
   rotaryEncoder.begin();
   rotaryEncoder.setup(readEncoderISR);
@@ -109,16 +106,16 @@ void setup() {
   rotaryEncoder.setEncoderValue(int(thermocouple.readCelsius())); // init start value rotary encoder
   Serial.println("RotaryEncoder init");
   // ***************************    PID regulator    **************************
-  //set point 100% or 400 Celsium
-  SetPoint = 400;
-  /*
+  /* 
   TableHeatPID.begin();           // initialize the PID instance
-  TableHeatPID.setpoint(SetPoint);// The "goal" the PID controller tries to "reach"
+  TableHeatPID.setpoint(Curr_Temp);// The "goal" the PID controller tries to "reach"
   TableHeatPID.tune(Kp, Kd, Ki);  // Tune the PID, arguments: kP, kI, kD
   TableHeatPID.limit(0, 100);    // Limit the PID output between 0 and 255, this is important to get rid of integral windup!
-  */
-  //set PID update interval to 1000ms 
-  TableHeatPID.SetSampleTime(500); 
+   */
+  //set PID and update interval to 500ms 
+  TableHeatPID.SetMode(AUTOMATIC);
+  TableHeatPID.SetSampleTime(500);
+  TableHeatPID.SetOutputLimits(0, 100);
   Serial.println("PID regulator init");
   // ***************************    RBD dimmer    **************************
   TableHeat.begin(NORMAL_MODE, ON); //dimmer initialisation: name.begin(MODE, STATE) 
@@ -128,7 +125,6 @@ void setup() {
   Mode =0 ;
   State= 0;
   initWIFI();
-
 }
 //***********************************************************************
 void loop() {
@@ -159,11 +155,10 @@ void controler_loop(void){
       return;
     }
     if(Mode & MANUAL_HEATING){
-      State |= CUR_MES;       // Установка флага вывода выбранной(ручной) температуры 
+      State |= CUR_MES;      // Установка флага вывода выбранной(ручной) температуры 
       State &= ~HEATING;     // Выключение нагревателя
-      Curr_Temp = rotaryEncoder.readEncoder();// чтение энкодера в выбраную температуру
+      Curr_Temp = rotaryEncoder.readEncoder();// чтение энкодера и запись в выбраную температуру
       //TableHeatPID.setpoint(Curr_Temp);
-      SetPoint = Curr_Temp;
     }
     if(Mode & PROG_HEATING){
       Current_pos = rotaryEncoder.encoderChanged();
@@ -235,13 +230,12 @@ void controler_loop(void){
   }
   // myflags |= option4; // включаем option4  
   // myflags &= ~option4; // выключаем option4
-  // myflags ^= option4; // включаем или выключаем option4 
+  // myflags ^= option4; // включаем или выключаем(ИНВЕРТИРУЕМ) option4 
   // if (myflags & option4) ... // если option4 установлено - что-нибудь делаем
   //  if ((mask & value) != 0U)
   //  {
   //      value &= ~myflags; clear
   //  }
-
   //**** Сброс бита для вывода устанавливаемой температуры через 3 сек *********
   if((State&CUR_MES) && (millis()-lastTimeWait > GUI_TIME_DELAY)){
     State &= ~CUR_MES; // переключения на вывод измеренной температуры
@@ -277,10 +271,9 @@ void model_loop(void){
     Temperature = Measured_Temp;
   }
   //***********  Управление температурой PID контролером и Dimmer *****************
-
   if(Mode&MANUAL_HEATING){
     //valComputePID = TableHeatPID.compute(Measured_Temp);
-    valComputePID = TableHeatPID.Compute();
+    TableHeatPID.Compute();
     #ifdef __DEBUG__
       Serial.println("MODEL ****** MANUAL_HEATING *** model_loop");
     #endif    
@@ -294,10 +287,8 @@ void model_loop(void){
       Serial.print("MODEL ****** PROG_HEATING ");
     #endif    
     */
-    TableHeatPID.Compute();
-    valComputePID = OutputVal;
-    
     //valComputePID = TableHeatPID.compute(Measured_Temp);
+    TableHeatPID.Compute();
   }  
   else if(State&HEATING){ //
     #ifdef __DEBUG__
@@ -308,8 +299,7 @@ void model_loop(void){
       Serial.print("valComputePID = ");
       Serial.println(String(int(valComputePID), DEC));
     #endif
-    //TableHeat.setPower(int(valComputePID));
-    TableHeat.setPower(int(OutputVal));
+    TableHeat.setPower(int(valComputePID));
   } 
 }
 
@@ -405,21 +395,21 @@ void DisplayMenu(menu *Menu){
     display.setFont(&FreeSerif12pt7b);
     display.setTextSize(1);
     display.setTextColor(WHITE);
-    
-    for(selection_num=0; selection_num <= Menu[selection_num].num_selections; selection_num ++){// Вывод меню на экран
+    // Вывод меню на экран
+    for(selection_num=0; selection_num <= Menu[selection_num].num_selections; selection_num ++){
       if(Current_pos == Menu[selection_num].num_selections){    // Вывод курсора на экран
         display.setCursor(Menu[selection_num].XPOS-14, Menu[selection_num].YPOS);
         display.print(">");
       }
       display.setCursor(Menu[selection_num].XPOS, Menu[selection_num].YPOS);
       display.print(Menu[selection_num].Str);
-      Serial.println(Menu[selection_num].Str);
     }
     display.display();
 }
 
 void ControlerMenu(menu *Menu, int8_t *mode, int8_t *state, int8_t *cur_pos){
-
+    Menu[Current_pos].fn_arg;
+    Serial.println(Menu[0].fn_arg[0]);
 
 }
 

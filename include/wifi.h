@@ -98,7 +98,6 @@ void status(void){
 }
 
 void pid(void){
-    //json = "{\"varComputePID\": \"" + String(valComputePID) + "\"}";
-    json = "{\"varComputePID\": \"" + String(OutputVal) + "\"}";
+    json = "{\"varComputePID\": \"" + String(valComputePID) + "\"}";
     server.send (200, "text/json", json);// send JSON text to client
 }

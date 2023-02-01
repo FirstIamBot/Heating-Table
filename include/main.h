@@ -64,7 +64,7 @@ int MAX6675_CLK = 13; // серый
 
 #define TEMPHEATMAXVALUE 100
 // ************************ PID controller  settings and gains **********************
-double Kp=6, Ki=0.5, Kd=1;
+double Kp=4, Ki=0.5, Kd=1;
 // ************************************************************************************* 
 
 #endif // end 
