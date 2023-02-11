@@ -5,8 +5,9 @@
 void initDisplay();
 void DisplayTemp(int16_t x, int16_t y, double *temp);
 void DisplayPwr(int16_t x, int16_t y, double *pwr);
+unsigned char  DisplayTime(unsigned long *tm1, int *tm2);
+void DisplayProg(unsigned char tm ,double *tmp, double *vlCmpuPID);
 void DislayLogo(void);
-
 
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
@@ -21,7 +22,9 @@ void initDisplay(){
   }
   Serial.println("SSD1306 init");
 }
-
+/*
+  Вывод на OLED значение темперературы
+*/
 
 void DisplayTemp(int16_t x, int16_t y, double *temp){
   static char outstr[6];
@@ -29,40 +32,72 @@ void DisplayTemp(int16_t x, int16_t y, double *temp){
 
 	if (millis() - lastLCDUpdate > 500)
 	{
-    //display.clearDisplay();
     display.setFont(&FreeSerif12pt7b);
     display.setTextSize(1);
     display.setTextColor(WHITE);
     display.setCursor(x, y);
     display.print(dtostrf(*temp ,4, 2, outstr));
     //display.print(" C");
-    display.display();
+    //display.display();
     lastLCDUpdate = millis();
   }
   display.display();
-
 }
 
+/*
+  Вывод на OLED значение мощности
+*/
 void DisplayPwr(int16_t x, int16_t y, double *pwr){
-  static char outstr[4];
   static unsigned long lastLCDUpdate;
 
 	if (millis() - lastLCDUpdate > 500)
 	{
-    //display.clearDisplay();
     display.setFont(&Picopixel);
     display.setTextSize(1);
     display.setTextColor(WHITE);
     display.setCursor(x, y);
-    display.print(dtostrf(*pwr ,4, 2, outstr));
-    //display.print(" C");
-    display.display();
+    display.print(String(int(*pwr)));
+    display.print("%");
     lastLCDUpdate = millis();
   }
   display.display();
+}
+/*
+  Вывод на OLED  значение Time
+*/
+unsigned char  DisplayTime(unsigned long *tm1, int *tm2){
+  static unsigned long lastLCDUpdate;
+  unsigned char tm;
+  char buf[3];
+	if (millis() - lastLCDUpdate > 500)
+	{
+    display.setFont(&Picopixel);
+    display.setTextSize(1);
+    display.setTextColor(WHITE);
 
+    sprintf(buf, "%l,u", tm1);
+
+    display.print(buf);
+    display.print("C");
+    lastLCDUpdate = millis();
+  }
+  return tm;
 }
 
+void DisplayProg(unsigned char tm ,double *tmp, double *vlCmpuPID){
+    display.setFont(&FreeSerif12pt7b);
+    display.setTextSize(1);
+    display.setTextColor(WHITE); 
+    display.setCursor(5, 20);
+    display.print("t=");  
+    display.setCursor(40, 20);
+    display.print(tm); 
+    display.setCursor(5, 45);
+    display.print("T=");  
+    DisplayTemp(40, 45, tmp);
+    DisplayPwr(110, 10, vlCmpuPID);
+}
+//
 void DislayLogo(void){
         display.clearDisplay();
         display.setFont(&FreeSerif12pt7b);

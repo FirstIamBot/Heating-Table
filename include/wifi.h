@@ -23,6 +23,7 @@ void dbg(void);
 void status(void);
 void temp(void);
 void pid(void);
+
 //*********************************************
 void initWIFI(void){
         // Connect to Wi-Fi network with SSID and password
@@ -38,7 +39,7 @@ void initWIFI(void){
     server.on("/gdburl", dbg);   // map URLs to functions:
     server.on("/statusurl", status);   // map URLs to functions:
     server.on("/pidurl", pid);   // map URLs to functions:    
-    IPAddress IP = WiFi.softAPIP();
+    IP = WiFi.softAPIP();
     Serial.print("AP IP address: ");
     Serial.println(IP);
     server.begin();
@@ -82,15 +83,22 @@ void status(void){
     else if(Mode & PROG_HEATING){
         str = "PROG HEATING";
     }
+    else if(Mode & PROG_HEATING && Mode & PROG0){
+        str = "PROG0";
+    }
+    else if(Mode & PROG_HEATING && Mode & PROG1){
+        str = "PROG1";
+    }
     else if(Mode & SETTING){
         str = "SETTING";
     }
     json = "{\"varMode\": \"" + str  + "\",";
+    str ="";
     if(State & HEATING){
         str = "HEATING";
     }
-    else if(!State & HEATING){
-        str = "";
+    if(State & CUR_MES){
+        str = "CUR_MES";
     }
     json += "\"varStatus\": \"" + str + "\"}";
 
@@ -98,6 +106,6 @@ void status(void){
 }
 
 void pid(void){
-    json = "{\"varComputePID\": \"" + String(valComputePID) + "\"}";
+    json = "{\"varComputePID\": \"" + String(int(valComputePID)) + "\"}";
     server.send (200, "text/json", json);// send JSON text to client
 }

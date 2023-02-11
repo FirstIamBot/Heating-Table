@@ -34,11 +34,11 @@ char page_dbg[] PROGMEM = R"(
 <p>Current Temperature: <span id='varCurrT'>0 </span>&degC</p>
 </div>
 <div class="block1">
-********* Debug *********
+**** Debug ****
 <p>valComputePID - <span id='varComputePID'>0 </span>%</p>
 <p>Mode: <span id='varMode'> </span><p>
 <p>Status: <span id='varStatus'> </span><p>
-*************************
+***************
 </div>
     <!-------------------------JavaScrip------------------------->
     <script >

@@ -13,6 +13,10 @@
 #include "webpage/index.h"
 #include "webpage/dbg.h"
 
+// update from OTA
+
+
+
 //*************************  MODE and State working HEAT_TABLE ******************************
 // MODE FLAG's
 #define STANDBAY 0          // режим ожидания
@@ -23,7 +27,7 @@
 #define PROG1   16          // Pb-free   безсвинцовый припой
 
 // State FLAG's
-#define HEATING 1   // включение нагрева стола
+#define HEATING 1  // Флаг включеного нагревателя стола(для вывода на OLED, запись и вычесление PID)
 #define CUR_MES 2  // Флаг вывода температуры: 0 - измереная, 1 - установленая(ручная)
 #define Entrer  4
 
@@ -34,7 +38,7 @@
 #define SHORT_PRESS 1   // короткое нажатие кнопки
 #define LONG_PRESS  2   // длинное нажатие кнопки
 // Time key pres mSec
-#define SHORT_PRESS_TIME 500    // время короткого нажатия 0,5 сек
+#define SHORT_PRESS_TIME 300    // время короткого нажатия 0,5 сек
 #define LONG_PRESS_TIME  3000   // время длинного нажатия 3 сек
 //************************************** I2c Bus  ***********************************
 #define SCL 4
@@ -50,22 +54,22 @@ int MAX6675_DO  = 14; // голубой
 int MAX6675_CS  = 12; // фиолетовый
 int MAX6675_CLK = 13; // серый
 //********************************     Rotary Encoder    ******************************
-#define ROTARY_ENCODER_A_PIN      3  // CLK(А)     синий   25 
-#define ROTARY_ENCODER_B_PIN      1  // DT(В)      зелёный 26
+#define ROTARY_ENCODER_A_PIN      1  // CLK(А)     синий   25 
+#define ROTARY_ENCODER_B_PIN      3  // DT(В)      зелёный 26
 #define ROTARY_ENCODER_BUTTON_PIN 15  // SW(Button) фиолетовый
 #define ROTARY_ENCODER_VCC_PIN   -1   //
 //depending on your encoder - try 1,2 or 4 to get expected behaviour
 //#define ROTARY_ENCODER_STEPS 1
 //#define ROTARY_ENCODER_STEPS 2
 #define ROTARY_ENCODER_STEPS 4
-
 // ********************************** RBD dimmer ************************************
-#define OUTPUT_PIN 4 //12 
-#define ZEROCROSS  2 //7 // 5 for boards with CHANGEBLE input pins
-
-#define TEMPHEATMAXVALUE 100
+#define OUTPUT_PIN 25 
+#define ZEROCROSS  26 
 // ************************ PID controller  settings and gains **********************
-double Kp=4, Ki=0.5, Kd=1;
+double Kp=10, Ki=3, Kd=3;
+//double Kp=6, Ki=2, Kd=2;
 // ************************************************************************************* 
+IPAddress IP;
+
 
 #endif // end 
