@@ -39,6 +39,7 @@ int8_t index_pos = 0;
 
 double Temperature, Measured_Temp, Curr_Temp, valComputePID;
 double coeffTempTable = 0; // температурный коэфициент нагревательного стола
+int8_t tProg;
 unsigned long time1;
 unsigned long time2;   
 
@@ -268,40 +269,40 @@ void controler_loop(void){
   }
   //**** Установка Curr_temp в зависимости от времерни для режимов PROG0 и PROG1 *********
   if((Mode&PROG_HEATING) && Mode&PROG0){
-    if(Prog0[0][0] > millis()-lastTimeProg){
-      time1 = Prog0[0][0];
-      time2 = millis()-lastTimeProg;      
+    tProg = (millis()-lastTimeProg)/1000;
+    if(Prog0[0][0] > tProg){      
       Curr_Temp = Prog0[0][1];
       TableHeatPID.setpoint(Curr_Temp);
     }
-    else if(Prog0[0][0] < millis()-lastTimeProg < Prog0[1][0]){
+    else if(Prog0[0][0] < tProg < Prog0[1][0]){
       Curr_Temp = Prog0[1][1];
       TableHeatPID.setpoint(Curr_Temp);
     }
-    else if(Prog0[1][0] < millis()-lastTimeProg < Prog0[2][0]){
+    else if(Prog0[1][0] < tProg < Prog0[2][0]){
       Curr_Temp = Prog0[2][1];
       TableHeatPID.setpoint(Curr_Temp);
     }
-    else if(Prog0[2][0] < millis()-lastTimeProg < Prog0[3][0]){
+    else if(Prog0[2][0] < tProg < Prog0[3][0]){
       Curr_Temp = Prog0[3][1];
       TableHeatPID.setpoint(Curr_Temp);
     }
     lastTimeProg = millis();
   }
   if(((Mode&PROG_HEATING)) && (Mode&PROG1)){
-    if(Prog1[0][0] > millis()-lastTimeProg ){
+    tProg = (millis()-lastTimeProg)/1000;
+    if(Prog1[0][0] > tProg ){
       Curr_Temp = Prog1[0][1];
       TableHeatPID.setpoint(Curr_Temp);
     }
-    else if(Prog1[0][0] < millis()-lastTimeProg < Prog1[1][0]){
+    else if(Prog1[0][0] < tProg < Prog1[1][0]){
       Curr_Temp = Prog1[1][1];
       TableHeatPID.setpoint(Curr_Temp);
     }
-    else if(Prog1[1][0] < millis()-lastTimeProg < Prog1[2][0]){
+    else if(Prog1[1][0] < tProg < Prog1[2][0]){
       Curr_Temp = Prog1[2][1];
       TableHeatPID.setpoint(Curr_Temp);
     }
-    else if(Prog1[2][0] < millis()-lastTimeProg < Prog1[3][0]){
+    else if(Prog1[2][0] < tProg < Prog1[3][0]){
       Curr_Temp = Prog1[3][1];
       TableHeatPID.setpoint(Curr_Temp);
     }
@@ -335,10 +336,10 @@ void model_loop(void){
   }
   //***********  Управление температурой PID контролером и Dimmer *****************
   if(Mode & MANUAL_HEATING){
-    //if((Curr_Temp - Measured_Temp)<=20){
-      //TableHeatPID.tune(1,1,1);
-    //  TableHeatPID.minimize(100); // default = 10
-    //}
+    if((Curr_Temp - Measured_Temp)<=20){
+      //TableHeatPID.tune(2,1,1);
+      TableHeatPID.minimize(100); // default = 10
+    }
     valComputePID = TableHeatPID.compute(Measured_Temp);   
   } 
   else if(Mode&PROG_HEATING && Mode&PROG0){
@@ -416,10 +417,10 @@ bool loop_GUI(double *temperature){
         }
       }
       else if(Mode&PROG0){
-        DisplayProg(20, temperature, &valComputePID);
+        DisplayProg(tProg, temperature, &valComputePID);
       }
       else if(Mode&PROG1){
-        DisplayProg(25, temperature, &valComputePID);
+        DisplayProg(tProg, temperature, &valComputePID);
       }
       display.display();
     }
