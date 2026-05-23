@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>ESP Heat Table</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" type="text/css" href="style.css">
+    <link rel="icon"  type="image/png" href="favicon.png">
+</head>
+<body>
+<h2>Temperature</h2>
+<div class="card">
+    <p>Measured Temperature: <span id='varMesT' >0 </span>C</p>
+    <p>Current Temperature: <span id='varCurrT'>0 </span>C</p>
+</div>
+
+<h3>Temperature Graph</h3>
+<div class="card graph-wide">
+    <canvas id="tempChart" class="temp-chart"></canvas>
+</div>
+
+<h4 class="state">Debug table</h4>
+<div class="card-debug">
+    <table class="compact-table">
+        <tr>
+          <th>Reg Name</th>
+          <th>Reg Value</th>
+        </tr>
+        <tr>
+          <td>Mode</td>
+          <td id='varMode'></td>
+        </tr>
+        <tr>
+          <td>Status</td>
+          <td id='varStatus'></td>
+        </tr>
+        <tr>
+          <td>deltaTemp</td>
+          <td id='vardeltaTemp'></td>
+        </tr>
+        <tr>
+        <td>valComputePID</td>
+            <td id='varComputePID'></td>
+        </tr>
+        <tr>
+            <td>tProg</td>
+            <td id='vartProg'></td>
+        </tr>
+        <tr>
+            <td>steepness</td>
+            <td id='varsteepness'></td>
+        </tr>
+        <tr>
+            <td>coeffTempTable</td>
+            <td id='varcoeffTempTable'></td>
+        </tr>
+    </table>   
+</div>
+
+<h3>Wi-Fi log</h3>
+<div class="card">
+    <pre id="wifiLog" class="wifi-log"></pre>
+</div>
+
+<footer class="footer">
+    Heating Table 2023
+</footer>
+<!-------------------------JavaScrip------------------------->
+<script src="script.js"></script>   
+</body>
+</html>

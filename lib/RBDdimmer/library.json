@@ -1,0 +1,23 @@
+{
+  "name": "RBDdimmer",
+  "version": "1.0",
+  "description": "Arduino AC-dimming library for AVR, ESP8266, ESP32 processor",
+  "keywords": "RBDdimmer, dimmer, lamp, AVR, M0, SAM3, ESP8266, ESP32, STM32", 
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Lib-RBD-Dimmer-for-ESP32/RBDdimmerESP32.git"
+  },
+  "authors":
+  [
+   {
+	"name": "RobotDyn (Vladislav Snegirev & Ivan Kryukov)"
+   }
+  ],
+  "license": "MIT",
+  "frameworks": "arduino",
+  "dependencies": {},
+  "platforms": [
+    "atmelavr",
+    "espressif"
+  ]
+}

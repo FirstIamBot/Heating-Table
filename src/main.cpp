@@ -7,41 +7,39 @@
 #include "max6675.h"
 #include <AiEsp32RotaryEncoder.h>
 #include <RBDdimmer.h>
-#include <PIDController.h>
+#include <QuickPID.h>
 #include "image.h"
 #include "main.h"
 
 //#define ARDUINO_ARCH_ESP32
-#define __DEBUG__
+//#define __DEBUG__
 
 //********************* User variables ******************************
-//float Temperature, Curr_Temp, Measured_Temp;
-int64_t Encpos;
 int8_t Button;
 
-//***********  mode reg (Режим роботы нагревательного стола ) **************************
-//    7     6      5       4       3          2            1           0
-// |     |     | PROG1 | PROG0 |SETTING|PROG_HEATING|MANUAL_HEATING|STANDBAY|
+//***int8_t Mode  mode reg (Режим роботы нагревательного стола ) **************************
+//    7     6      5       4       3       2            1           0
+// |     |     | FLAG_PROG1 | FLAG_PROG0 |FLAG_TEST|FLAG_PROG_HEATING|FLAG_MANUAL_HEATING|FLAG_STANDBAY|
 //
 //********************************************************************
 int8_t Mode;
 
-//***********  status mode reg (Статус нагревательного стола ) ****************
-//    7     6     5     4     3     2      1      0
-// |     |     |     |     |     |     |CUR_MES|HEATING|
+//****int8_t State   status mode reg (Статус нагревательного стола ) ****************
+//    7     6     5     4     3       2       1       0
+// |     |     |     |     |     |FLAG_Tracking|FLAG_CUR_MES|FLAG_HEATING|
 //
 //********************************************************************
 int8_t State;//
 
-int8_t Current_pos = 0;
-int8_t Select_pos = 0;
-int8_t index_pos = 0;
+int8_t Current_pos = 2;
 
-double Temperature, Measured_Temp, Curr_Temp, valComputePID;
+double Temperature, Measured_Temp, valComputePID=0, Curr_Temp=10;
+float pidInput = 0, pidOutput = 0, pidSetpoint = 0;
+double steepness;
 double coeffTempTable = 0; // температурный коэфициент нагревательного стола
-int8_t tProg;
-unsigned long time1;
-unsigned long time2;   
+int tProg;
+int getPower;
+int16_t deltaTemp; 
 
 // array temperature on time for programing heating
 int16_t Prog0[4][2]={{50, 125},{120, 125},{210, 235},{240, 0}};// SnPb
@@ -63,18 +61,18 @@ menu prog[2][7]={
   {1, 1, "Pb-free", 25, 48, 0, (uint8_t*)Prog1},
 };
 
-void DisplayMenu(void);
-void ControlerMenu(void);
 //********************************************************************
 bool temp_loop_pntr(double *temperature);
 void model_loop(void);
-
 bool loop_GUI(double *temperature);
-
 uint8_t rotary_EncoderButton(void);
 void controler_loop(void);
-//********************************************************************
-//Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+static void logWifi(const String &message) {
+  Serial.println(message);
+  notifyLogClients(message);
+}
+//******************** Define object ************************
 AiEsp32RotaryEncoder rotaryEncoder = AiEsp32RotaryEncoder(
                     ROTARY_ENCODER_A_PIN, \
                     ROTARY_ENCODER_B_PIN, \
@@ -83,84 +81,101 @@ AiEsp32RotaryEncoder rotaryEncoder = AiEsp32RotaryEncoder(
                     ROTARY_ENCODER_STEPS);
 MAX6675 thermocouple(MAX6675_CLK, MAX6675_CS, MAX6675_DO);
 dimmerLamp TableHeat(OUTPUT_PIN, ZEROCROSS); //initialase port for dimmer for ESP8266, ESP32, Arduino due boards
-PIDController TableHeatPID; // Create an instance of the PID controller class, called "pid"
-//***********************************************************************
+QuickPID TableHeatPID(&pidInput, &pidOutput, &pidSetpoint); // QuickPID instance
+
+//********************** Initialize ISR for rodaryEncoder ***************
 void IRAM_ATTR readEncoderISR()
 {
   rotaryEncoder.readEncoder_ISR();
 }
+
+//********************** Initialize SPIFFS ******************************
+void initSPIFFS() {
+  if (!SPIFFS.begin(true)) {
+    Serial.println("An error has occurred while mounting SPIFFS");
+  }
+  Serial.println("SPIFFS mounted successfully");
+}
+
+
 //***********************************************************************
 void setup() {
   Serial.begin(115200);
   initDisplay();
   DislayLogo();
-  //*****************************    max6675    *************************
-  Serial.println("MAX6675 init");
-  // wait for MAX chip to stabilize
-  delay(200);
-  temp_loop_pntr(&Curr_Temp);// измерение температуры запись начального значения температуры
-  //****************************    rotaryEncoder    *********************
+  initSPIFFS();
+  initWIFI();
+  initWebServer();
+  initWebSocket();
+  //***************************AotaryEncoder    *********************
   rotaryEncoder.begin();
   rotaryEncoder.setup(readEncoderISR);
   //rotaryEncoder.setup([]{rotaryEncoder.readEncoder_ISR();}); // установка прерываний для Энкодера
   //optionally we can set boundaries and if values should cycle or not
   bool circleValues = false;
-  rotaryEncoder.setBoundaries(0, 400, circleValues);// Установка границы от текущей темрературы до максимальной
-  rotaryEncoder.setAcceleration(150); //or set the value - larger number = more accelearation; 0 or 1 means disabled acceleration
+  rotaryEncoder.setBoundaries(0, 280, circleValues);// Установка границы от текущей темрературы до максимальной
+  rotaryEncoder.setAcceleration(100); //or set the value - larger number = more accelearation; 0 or 1 means disabled acceleration
   //rotaryEncoder.disableAcceleration(); //acceleration is now enabled by default - disable if you dont need it
   rotaryEncoder.setEncoderValue(25); //int(thermocouple.readCelsius()) init start value rotary encoder
-  Serial.println("RotaryEncoder init");
+  logWifi("RotaryEncoder init");
   // ***************************    PID regulator    **************************
-  TableHeatPID.begin();           // initialize the PID instance
-  TableHeatPID.setpoint(Curr_Temp);// The "goal" the PID controller tries to "reach"
-  TableHeatPID.tune(Kp, Kd, Ki);  // Tune the PID, arguments: kP, kI, kD
-  TableHeatPID.limit(0, 100);    // Limit the PID output between 0 and 255, this is important to get rid of integral windup!
-  Serial.println("PID regulator init");
+  pidSetpoint = (float)Curr_Temp;
+  Kp=0.299, Ki=0.005, Kd=0.0;
+  // Near-setpoint defaults for inertial heater (can be overridden via WebSocket)
+  KpTracking = Kp * 0.45;
+  KiTracking = Ki * 0.20;
+  KdTracking = 0.0;
+  twoZonePID = 1;
+  //Kp=11.14817586323742732, Ki=0.0093430506411197874, Kd=0.013430506411197874;
+  //Kp=1, Ki=0.307, Kd=27.475;
+  switchTemp=3;
+
+  TableHeatPID.SetTunings((float)Kp, (float)Ki, (float)Kd); // Tune the PID, arguments: kP, kI, kD
+  TableHeatPID.SetOutputLimits(0, 100); // Limit output 0-100% for NORMAL_MODE dimmer
+  TableHeatPID.SetMode(QuickPID::Control::automatic);
+  logWifi("PID regulator init");
   // ***************************    RBD dimmer    **************************
-  TableHeat.begin(NORMAL_MODE, OFF); //dimmer initialisation: name.begin(MODE, STATE) TOGGLE_MODE
-  //TableHeat.setPower(0);
-  //delay(10);
-  //TableHeat.setState(ON); //name.setState(ON/OFF);
-  //TableHeat.toggleSettings(0, 100);
-  Serial.println("RBD dimmer init");
+  TableHeat.begin(NORMAL_MODE, OFF); //dimmer initialisation: NORMAL_MODE  TOGGLE_MODE
+  TableHeat.setPower(0);
+  logWifi("RBD dimmer init");
   //***************************************
-  Mode = 0 ;
+  Mode = 0;
   State= 0;
-  initWIFI();
+  unitProg=600;
+  minimize=10;
 }
 //***********************************************************************
 void loop() {
-  controler_loop();// управление режимами
+  controler_loop();       // управление режимами
   model_loop();
-  // вывод на OLED
-  loop_GUI(&Temperature); 
-  // вывод на WiFI
-  server.handleClient();        // manage HTTP requests
+  loop_GUI(&Temperature); // вывод на OLED
+  ws.cleanupClients();
 }
-//########################################################################################
+//***********************************************************************
 void controler_loop(void){
 
   uint8_t button; 
-  static unsigned long lastTimeWait = 0;
-  static unsigned long lastTimeProg;
+  static unsigned long lastTimeWait;//=0
+  static unsigned long lastTimeProg;//=0
+  static unsigned long lastSetTempWait;
   //*****************************************
   // Encoder rotary
   //*****************************************
   // действия на вращения енкодера в разных режимах
 	if (rotaryEncoder.encoderChanged())
 	{
-    if(Mode&STANDBAY){
-      State &= ~HEATING;
+    if(Mode&FLAG_STANDBAY){
+      State &= ~FLAG_HEATING;
       return;
+    } 
+    if(Mode&FLAG_MANUAL_HEATING){
+      State |= FLAG_CUR_MES;      // Установка флага вывода выбранной(ручной) температуры 
+      State &= ~FLAG_HEATING;     // Выключение нагревателя
+      Curr_Temp = (double)rotaryEncoder.readEncoder();// чтение энкодера и запись в выбраную температуру
+      pidSetpoint = (float)(Curr_Temp + calibrateTemp);   // Установка температуры нагрева стола
     }
-    if(Mode&MANUAL_HEATING){
-      State |= CUR_MES;      // Установка флага вывода выбранной(ручной) температуры 
-      State &= ~HEATING;     // Выключение нагревателя
-      Curr_Temp = rotaryEncoder.readEncoder();// чтение энкодера и запись в выбраную температуру
-      TableHeatPID.setpoint(Curr_Temp);
-    }
-    if(Mode&PROG_HEATING){
-      Current_pos++;
+    if(Mode&FLAG_PROG_HEATING){
+      Current_pos++; // Выбор режима роботы нагревателя SnPb или Pb-free 
       if(Current_pos<=0){
         Current_pos=2;
       }
@@ -168,7 +183,7 @@ void controler_loop(void){
         Current_pos=0;
       }
     }
-    if(Mode & SETTING){
+    if(Mode & FLAG_TEST){
       Current_pos = rotaryEncoder.encoderChanged();
       if (Current_pos>0) Serial.println("11111");
       if (Current_pos<0) Serial.println("22222"); 
@@ -180,70 +195,73 @@ void controler_loop(void){
   // действия на нажатие кнопки енкодера в разных режимах
   button = rotary_EncoderButton();
   if(button){
-    State &= ~HEATING;     // Выключение нагревателя
+    State &= ~FLAG_HEATING;     // Выключение нагревателя
     #ifdef __DEBUG__
       Serial.print(" button=");
       Serial.println(String(button, BIN));
-      //Serial.print(" Mode=");
+      //Serial.print(" Mode =");
       //Serial.println(String(Mode, BIN));
     #endif
     // Выбор режимов роботы Heating Table
     // Короткое нажатие кнопки
-    if(button & SHORT_PRESS){
-      if(Mode == STANDBAY){
-        Mode &= ~STANDBAY;
-        Mode |= MANUAL_HEATING;
+    if(button & FLAG_SHORT_PRESS){
+      if(Mode == FLAG_STANDBAY){
+        Mode &= ~FLAG_STANDBAY;
+        Mode |= FLAG_MANUAL_HEATING;
+        tProg=0;
         #ifdef __DEBUG__
-          Serial.println("Mode == MANUAL_HEATING");
+          Serial.println("Mode == FLAG_MANUAL_HEATING");
         #endif
       }
-      else if(Mode & MANUAL_HEATING){
-        Mode &= ~MANUAL_HEATING;
-        Mode |= PROG_HEATING;
-        //TableHeat.setState(OFF); // State(ON/OFF);
-        #ifdef __DEBUG__
-          Serial.println("Mode == PROG_HEATING");
-        #endif
+      else if(Mode&FLAG_MANUAL_HEATING){
+        Mode &= ~FLAG_MANUAL_HEATING;
+        Mode |= FLAG_PROG_HEATING;
+        tProg=0;
+        TableHeat.setState(OFF); // State(ON/OFF);
       }
-      else if((Mode & PROG_HEATING) && (Current_pos == 0)){
-        Mode |= PROG0;
-        Mode &= ~PROG1;
+      else if((Mode&FLAG_PROG_HEATING) && (Current_pos == 0)){
+        Mode |= FLAG_PROG0;
+        Mode &= ~FLAG_PROG1;
+        tProg=0;
       }
-      else if((Mode & PROG_HEATING) && (Current_pos == 1)){
-        Mode |= PROG1;
-        Mode &= ~PROG0;
+      else if((Mode&FLAG_PROG_HEATING) && (Current_pos == 1)){
+        Mode |= FLAG_PROG1;
+        Mode &= ~FLAG_PROG0;
+        tProg=0;
       }
       // Выход из програмного режима 
-      else if(Mode & PROG_HEATING && Current_pos == 2){
-//*********************************************************
-        Mode &= ~PROG_HEATING;
-        Mode |= SETTING;
-        Mode &= ~PROG1;
-        Mode &= ~PROG0;
-        Current_pos = 0;
-//*********************************************************
+      else if(Mode&FLAG_PROG_HEATING && Current_pos == 2){
+        Mode &= ~FLAG_PROG_HEATING;
+        Mode &= ~FLAG_PROG1;
+        Mode &= ~FLAG_PROG0;        
+        Mode |= FLAG_STANDBAY;
+        Current_pos = 2;
+        tProg=0;
         TableHeat.setState(OFF); // State(ON/OFF);
         #ifdef __DEBUG__
-          Serial.println("Mode == SETTING");
+          Serial.println("Mode == StandBay");
         #endif
       }
-      else if(Mode & SETTING){
-        Mode &= ~SETTING;
-        Mode |= STANDBAY;
-        Current_pos = 0;
+      #ifdef __DEBUG__
+        else if(Mode&FLAG_TEST){
+        Mode &= ~FLAG_TEST;
+        Mode |= FLAG_STANDBAY;
+        Current_pos = 2;
+        tProg = 0;
         TableHeat.setState(OFF); // State(ON/OFF);
         #ifdef __DEBUG__
-          Serial.println("Mode == STANDBAY");
+          Serial.println("Mode == FLAG_STANDBAY");
         #endif
-      }
+        }
+      #endif      
     }
     // Длинное нажатие кнопки
-    if(button & LONG_PRESS){
+    if(button&FLAG_LONG_PRESS){
         #ifdef __DEBUG__
           Serial.println("A detected is LONG press in controler_loop");
         #endif
-        Mode &= ~PROG0;
-        Mode &= ~PROG1;
+        Mode &= ~FLAG_PROG0;
+        Mode &= ~FLAG_PROG1;
     }
   }
   // myflags |= option4; // включаем option4  
@@ -255,58 +273,33 @@ void controler_loop(void){
   //      value &= ~myflags; clear
   //  }
   //**** Сброс бита для вывода устанавливаемой температуры через 3 сек *********
-  if((State&CUR_MES) && (millis()-lastTimeWait > GUI_TIME_DELAY)){
-    State &= ~CUR_MES; // переключения на вывод измеренной температуры
+  if((State&FLAG_CUR_MES) && (millis()-lastTimeWait > GUI_TIME_DELAY)){
+    State &= ~FLAG_CUR_MES; // переключения на вывод измеренной температуры
     lastTimeWait = millis();
-  } 
-  if((Curr_Temp > (Measured_Temp + coeffTempTable)) && (Mode&MANUAL_HEATING || Mode&PROG_HEATING)){// Вкючение нагревателя
-    State |= HEATING;  // Включение флага нагревателя
+  }
+  if(Mode&FLAG_TEST || Mode&FLAG_MANUAL_HEATING || Mode&FLAG_PROG0 || Mode&FLAG_PROG1){// Активный режим нагрева
+    State |= FLAG_HEATING;  // Включение флага нагревателя
     TableHeat.setState(ON); // Включение нагревателя State(ON/OFF);
   }
   else{
-    State &= ~HEATING;  // Включение флага нагревателя
     TableHeat.setState(OFF); // Выключение нагревателя State(ON/OFF);
+    TableHeat.setPower(0);
+    State &= ~FLAG_HEATING;  // Выключение флага нагревателя
+    State &= ~FLAG_Tracking;
   }
-  //**** Установка Curr_temp в зависимости от времерни для режимов PROG0 и PROG1 *********
-  if((Mode&PROG_HEATING) && Mode&PROG0){
-    tProg = (millis()-lastTimeProg)/1000;
-    if(Prog0[0][0] > tProg){      
-      Curr_Temp = Prog0[0][1];
-      TableHeatPID.setpoint(Curr_Temp);
-    }
-    else if(Prog0[0][0] < tProg < Prog0[1][0]){
-      Curr_Temp = Prog0[1][1];
-      TableHeatPID.setpoint(Curr_Temp);
-    }
-    else if(Prog0[1][0] < tProg < Prog0[2][0]){
-      Curr_Temp = Prog0[2][1];
-      TableHeatPID.setpoint(Curr_Temp);
-    }
-    else if(Prog0[2][0] < tProg < Prog0[3][0]){
-      Curr_Temp = Prog0[3][1];
-      TableHeatPID.setpoint(Curr_Temp);
-    }
-    lastTimeProg = millis();
+  if((tProg>=unitProg) && (Mode&FLAG_TEST || Mode&FLAG_PROG0 || Mode&FLAG_PROG1)){ //Выключение режима Test через tProg сек
+    TableHeat.setState(OFF); // State(ON/OFF);
+    Current_pos = 2;
+    tProg = 0;
+    Mode &= ~FLAG_TEST;
+    Mode &= ~FLAG_PROG_HEATING;
+    Mode &= ~FLAG_PROG0;
+    Mode &= ~FLAG_PROG1;
+    Mode |= FLAG_STANDBAY;
+    notifyStopClients();
   }
-  if(((Mode&PROG_HEATING)) && (Mode&PROG1)){
-    tProg = (millis()-lastTimeProg)/1000;
-    if(Prog1[0][0] > tProg ){
-      Curr_Temp = Prog1[0][1];
-      TableHeatPID.setpoint(Curr_Temp);
-    }
-    else if(Prog1[0][0] < tProg < Prog1[1][0]){
-      Curr_Temp = Prog1[1][1];
-      TableHeatPID.setpoint(Curr_Temp);
-    }
-    else if(Prog1[1][0] < tProg < Prog1[2][0]){
-      Curr_Temp = Prog1[2][1];
-      TableHeatPID.setpoint(Curr_Temp);
-    }
-    else if(Prog1[2][0] < tProg < Prog1[3][0]){
-      Curr_Temp = Prog1[3][1];
-      TableHeatPID.setpoint(Curr_Temp);
-    }
-    lastTimeProg = millis();
+  else{
+    pidSetpoint = (float)(Curr_Temp + calibrateTemp);// Set setpoint = Curr_Temp from PC + callibrate Temperature
   }
 }
 
@@ -316,7 +309,7 @@ bool temp_loop_pntr(double *temperature){
 	static unsigned long lastTempUpdate = 0;
   
 	// Переодическое измерение температуры
-	if (millis() - lastTempUpdate > TEMP_READ_DELAY)
+	if (millis() - lastTempUpdate >  TEMP_READ_DELAY)
 	{
     *temperature = double(thermocouple.readCelsius());
     lastTempUpdate = millis();
@@ -324,43 +317,117 @@ bool temp_loop_pntr(double *temperature){
 	}
   return false;
 }
-
+// Дабовлен 18.03.23 Curr_Temp + calibrateTemp для компенсации ошибки при нагреве
 void model_loop(void){
 
+  static unsigned long lastTimeProg;
+
   temp_loop_pntr(&Measured_Temp);// измерение температуры
-  if(State&CUR_MES) {//вывод на OLED температуры измереной или устанволеной
+  pidInput = (float)Measured_Temp;
+  //***********  Управление температурой PID контролером и Dimmer *****************
+  if(Mode&FLAG_MANUAL_HEATING){
+    TableHeatPID.Compute();
+    valComputePID = pidOutput;
+  } 
+  else if(Mode&FLAG_PROG_HEATING && Mode&FLAG_PROG0){
+    if(tProg < 240){
+      Curr_Temp = 140;
+      pidSetpoint = (float)(Curr_Temp + calibrateTemp);
+    }
+    else if((240 < tProg) && (tProg < 340)){
+      Curr_Temp = 235;
+      pidSetpoint = (float)(Curr_Temp + calibrateTemp);
+    }
+    else if((340 < tProg) && (tProg < 345)){
+      Curr_Temp = 235;
+      pidSetpoint = (float)(Curr_Temp + calibrateTemp);
+    }
+    else if((345 < tProg) && (tProg < 600)){
+      Curr_Temp = 150;
+      pidSetpoint = (float)(Curr_Temp + calibrateTemp);
+    }
+    else if(tProg > 600){
+      tProg = 0;
+      Mode &= ~FLAG_PROG0;     // Выключение режима FLAG_PROG0
+      State &= ~FLAG_HEATING;  // Выключение нагревателя
+      Current_pos = 2;
+    }
+    TableHeatPID.Compute();
+    valComputePID = pidOutput;
+  }
+  else if(Mode&FLAG_PROG_HEATING && Mode&FLAG_PROG1){
+    if(tProg < 240){
+      Curr_Temp = 140;
+      pidSetpoint = (float)(Curr_Temp + calibrateTemp);
+    }
+    else if((240 < tProg) && (tProg < 340)){
+      Curr_Temp = 260;
+      pidSetpoint = (float)(Curr_Temp + calibrateTemp);
+    }
+    else if((340 < tProg) && (tProg < 345)){
+      Curr_Temp = 260;
+      pidSetpoint = (float)(Curr_Temp + calibrateTemp);
+    }
+    else if((345 < tProg) && (tProg < 600)){
+      Curr_Temp = 150;
+      pidSetpoint = (float)(Curr_Temp + calibrateTemp);
+    }
+    else if(tProg > 600){
+      tProg = 0;
+      Mode &= ~FLAG_PROG1;     // Выключение режима FLAG_PROG0
+      State &= ~FLAG_HEATING;  // Выключение нагревателя
+      Current_pos = 2;
+    }
+    TableHeatPID.Compute();
+    valComputePID = pidOutput;
+  }
+  else if(Mode&FLAG_TEST){
+    TableHeatPID.Compute();
+    valComputePID = pidOutput;
+  } 
+  if(State&FLAG_CUR_MES) {//вывод на OLED температуры измереной или устанволеной
     Temperature = Curr_Temp;
   }
   else{
     Temperature = Measured_Temp;
-  }
-  //***********  Управление температурой PID контролером и Dimmer *****************
-  if(Mode & MANUAL_HEATING){
-    if((Curr_Temp - Measured_Temp)<=20){
-      //TableHeatPID.tune(2,1,1);
-      TableHeatPID.minimize(100); // default = 10
+  }     
+  if(State&FLAG_HEATING){ //
+    static unsigned long lastPowerLogMs = 0;
+    TableHeat.setPower((int)valComputePID);
+    getPower = TableHeat.getPower();
+    if (millis() - lastPowerLogMs >= 1000) {
+      logWifi(
+        "heater power=" + String(getPower) +
+        " measured=" + String(Measured_Temp, 1) +
+        " set=" + String(Curr_Temp, 1)
+      );
+      lastPowerLogMs = millis();
     }
-    valComputePID = TableHeatPID.compute(Measured_Temp);   
-  } 
-  else if(Mode&PROG_HEATING && Mode&PROG0){
-    valComputePID = TableHeatPID.compute(Measured_Temp);
+    //getPower = (int)valComputePID;
+    deltaTemp = (int16_t)(Curr_Temp - Measured_Temp);
+    /**/
+    if(deltaTemp <= switchTemp){
+      if (twoZonePID) {
+        TableHeatPID.SetTunings((float)KpTracking, (float)KiTracking, (float)KdTracking);
+      } else {
+        TableHeatPID.SetTunings((float)Kp, (float)Ki, (float)Kd);
+      }
+      TableHeatPID.SetOutputLimits((float)minimize, 100); // tracking mode: min..100%
+      State |= FLAG_Tracking;
+    }
+    else{
+      TableHeatPID.SetTunings((float)Kp, (float)Ki, (float)Kd);
+      TableHeatPID.SetOutputLimits(0, 100); // full range: 0..100%
+      State &= ~FLAG_Tracking;
+    }    
   }
-  else if(Mode&PROG_HEATING && Mode&PROG1){
-    valComputePID = TableHeatPID.compute(Measured_Temp);
-  }  
-  else if(State&HEATING){ //
-    #ifdef __DEBUG__
-      Serial.print("Measured_Temp = ");
-      Serial.println(String(Measured_Temp, DEC));
-      Serial.print("Curr_Temp = ");
-      Serial.println(String(Curr_Temp, DEC));
-      Serial.print("valComputePID = ");
-      Serial.println(String(int(valComputePID), DEC));
-    #endif
-    //delay(10);
-    //TableHeat.setState(ON); //name.setState(ON/OFF);
-    TableHeat.setPower(int(valComputePID));//50
-  } 
+  // counter tPROG step 1 sec
+  if((Mode&FLAG_TEST || Mode&FLAG_PROG0 || Mode&FLAG_PROG1) && ((millis()-lastTimeProg) > 1000)) {
+    tProg += 1;//(millis()-lastTimeProg)/1000;
+    steepness = Measured_Temp/tProg; //крутизна температуры
+    notifyClients();      
+    lastTimeProg = millis();
+  }
 }
 
 bool loop_GUI(double *temperature){
@@ -373,7 +440,7 @@ bool loop_GUI(double *temperature){
 	if (millis() - lastGUIUpdate > GUI_UPDATE_DELAY)
 	{
     display.clearDisplay();
-    if(Mode == STANDBAY){
+    if(Mode == FLAG_STANDBAY){
       display.setFont(&FreeSerif9pt7b);
       display.setTextSize(1);
       display.setTextColor(WHITE);
@@ -385,28 +452,30 @@ bool loop_GUI(double *temperature){
       display.setFont(&FreeSerif9pt7b);
 
       DisplayTemp(25, 25, temperature);  
+      display.display();
     }
-    if(Mode & MANUAL_HEATING){
+    if(Mode&FLAG_MANUAL_HEATING){
       //display.setFont(&FreeSerif9pt7b);
       display.setTextSize(1);
       display.setTextColor(WHITE);
       // Выбор стрелок или нагревания 
-      if(State&CUR_MES){  
+      if(State&FLAG_CUR_MES){  
         display.drawBitmap(5, 20, epd_bitmap_up, 20, 36, WHITE); // заменить 36 на 40
         display.drawBitmap(110, 20, epd_bitmap_down, 20, 36, WHITE);        
       }
-      else if(State&HEATING && (Curr_Temp > Measured_Temp )){
+      else if(State&FLAG_HEATING && (Curr_Temp > Measured_Temp )){
         display.drawBitmap(5, 20, epd_bitmap_heating_table, 22, 21, WHITE);// подобрать 22,21
       }
       DisplayTemp(30, 40, temperature); 
       DisplayPwr(110, 10, &valComputePID);
+      display.display();
     }
-    if(Mode & PROG_HEATING){
+    if(Mode&FLAG_PROG_HEATING){
       display.setFont(&FreeSerif12pt7b);
       display.setTextSize(1);
       display.setTextColor(WHITE);    
       // Вывод меню на экран
-      if(!(Mode&PROG0 || Mode&PROG1)){
+      if(!(Mode&FLAG_PROG0 || Mode&FLAG_PROG1)){
         for(selection_num=0; selection_num < 2; selection_num ++){
           if( prog[selection_num]->num_selections == Current_pos ){
             display.setCursor(prog[selection_num]->XPOS-14, prog[selection_num]->YPOS);
@@ -416,22 +485,35 @@ bool loop_GUI(double *temperature){
           display.print(prog[selection_num]->Str);
         }
       }
-      else if(Mode&PROG0){
+      else if(Mode&FLAG_PROG0){
         DisplayProg(tProg, temperature, &valComputePID);
       }
-      else if(Mode&PROG1){
+      else if(Mode&FLAG_PROG1){
         DisplayProg(tProg, temperature, &valComputePID);
       }
       display.display();
     }
-    if(Mode & SETTING){
+    if(Mode&FLAG_TEST){
       display.setFont(&FreeSerif9pt7b);
       display.setTextSize(1);
       display.setTextColor(WHITE);
-      display.setCursor(20, 20);
-      display.print("Setting");
+      display.setCursor(10, 15);
+      display.print("Test");
+      
+      display.setCursor(1, 35);
+      display.print(String(Kp,1));
+      display.setCursor(40, 35);
+      display.print(String(Ki,1));
+      display.setCursor(75, 35);
+      display.print(String(Kd,1));
+
+      //DisplayTemp(1, 55, &Curr_Temp); 
+      DisplayTemp(70, 60, temperature); 
+      display.setFont(&Picopixel);
+      display.setCursor(70, 10);
+      display.print(String(tProg));
+      DisplayPwr(110, 10, &valComputePID);
       display.display();
-      //DisplayTemp(10, 10, temperature); 
     }
     lastGUIUpdate = millis();
 		return true;
@@ -441,218 +523,32 @@ bool loop_GUI(double *temperature){
 
 //########################################################################################
 uint8_t rotary_EncoderButton(void){
+    static bool buttonWasDown = false;
+    static unsigned long buttonPressedAt = 0;
+    unsigned long pressDuration = 0;
 
-    unsigned long  pressDuration;
+    bool buttonIsDown = rotaryEncoder.isEncoderButtonDown();
+    if (buttonIsDown && !buttonWasDown) {
+      buttonPressedAt = millis();
+      buttonWasDown = true;
+    }
 
-    pressDuration = rotaryEncoder.isEncoderButtonType();
+    if (!buttonIsDown && buttonWasDown) {
+      pressDuration = millis() - buttonPressedAt;
+      buttonWasDown = false;
+    }
 
-   //if( pressDuration < SHORT_PRESS_TIME ){
-     // return NOT_PRESS;
-   //}
    if( (SHORT_PRESS_TIME < pressDuration) && (LONG_PRESS_TIME > pressDuration ) ){
       #ifdef __DEBUG__
         Serial.println("A SHORT press is detected");
       #endif
-      return SHORT_PRESS;
+      return FLAG_SHORT_PRESS;
    }
    if( LONG_PRESS_TIME < pressDuration){
       #ifdef __DEBUG__
-        Serial.println("A LONG_PRESS is detected");
+        Serial.println("A FLAG_LONG_PRESS is detected");
       #endif
-      return LONG_PRESS;      
+      return FLAG_LONG_PRESS;      
     }
-   return NOT_PRESS;
-}
-
-//#################### Menu  function View, Controler #############################
- 
-void DisplayMenu(double *temperature){
-
-	static unsigned long lastGUIUpdate = 0;
-  static char outstr[6];
-  int selection_num;
-    
-  if (millis() - lastGUIUpdate > GUI_UPDATE_DELAY)
-  {
-    //display.clearDisplay();
-    if(Mode == STANDBAY){
-      display.setFont(&FreeSerif9pt7b);
-      display.setTextSize(1);
-      display.setTextColor(WHITE);
-      display.setCursor(20, 45);
-      display.print("Standbay");
-      display.setFont(&Picopixel);
-      display.setCursor(35, 55);
-      display.print(IP.toString());
-      display.setFont(&FreeSerif9pt7b);
-
-      DisplayTemp(25, 25, temperature);  
-    }
-    else if(Mode&MANUAL_HEATING){
-      display.setFont(&FreeSerif9pt7b);
-      display.setTextSize(1);
-      display.setTextColor(WHITE);
-      if(State&CUR_MES){  // Выбор стрелок или нагревания 
-        display.drawBitmap(5, 20, epd_bitmap_up, 20, 36, WHITE); 
-        display.drawBitmap(110, 20, epd_bitmap_down, 20, 36, WHITE);        
-      }
-      else if(State&HEATING && (Measured_Temp - Curr_Temp < 3 )){ //вывод на OLED температуры измереной или устанволеной
-        display.drawBitmap(5, 20, epd_bitmap_heating_table, 22, 21, WHITE);// подобрать 22,21
-      }
-      DisplayTemp(30, 40, temperature); 
-    }
-    // Вывод меню на экран в режиме PROG_HEATING
-    if(Mode & PROG_HEATING){
-        display.setFont(&FreeSerif12pt7b);
-        display.setTextSize(1);
-        display.setTextColor(WHITE);    
-        // Вывод меню на экран
-        if(!(Mode&PROG0 || Mode&PROG1)){
-          for(selection_num=0; selection_num < 2; selection_num ++){
-            if( prog[selection_num]->num_selections == Current_pos ){
-              display.setCursor(prog[selection_num]->XPOS-14, prog[selection_num]->YPOS);
-              display.print(">");
-            }
-            display.setCursor(prog[selection_num]->XPOS, prog[selection_num]->YPOS);
-            display.print(prog[selection_num]->Str);
-          }
-        }
-        else if(Mode&PROG0){
-            display.clearDisplay();
-            display.setCursor(30, 30);
-            display.print("SnPb");
-        }
-        else if(Mode&PROG1){
-            display.clearDisplay();
-            display.setCursor(30, 30);
-            display.print("Pb-free");
-        }
-    }
-    display.display();
-  }
-}
-
-void ControlerMenu(void){
-
-    static unsigned long lastTimeWait = 0;
-    uint8_t button;
-    
-    button = rotary_EncoderButton();
-
-    if(button){
-      if(button & SHORT_PRESS && Mode == STANDBAY){
-        Mode &= ~STANDBAY;
-        Mode |= MANUAL_HEATING;
-      }
-      else if(button&SHORT_PRESS && Mode&MANUAL_HEATING){
-        Mode &= ~MANUAL_HEATING;
-        Mode |= PROG_HEATING;
-        //TableHeat.setState(OFF); // State(ON/OFF);
-      }
-      else if(button&SHORT_PRESS && Mode&PROG_HEATING ){
-        Mode &= ~SETTING;
-        Mode |= STANDBAY;
-        Current_pos = 0;
-        TableHeat.setState(OFF); // State(ON/OFF);
-      }
-      else if(button&SHORT_PRESS && Mode&PROG_HEATING && Current_pos == 0 ){
-        Mode |= PROG0;
-      }
-      else if(button&SHORT_PRESS && Mode&PROG_HEATING && Current_pos ==1 ){
-        Mode |= PROG1;
-      }
-      else if(button&LONG_PRESS && Mode&PROG_HEATING && Current_pos == 2 ){
-        Mode &= ~PROG0;
-        Mode &= ~PROG1;
-      }
-    }
-    if(rotaryEncoder.encoderChanged()){
-      if(Mode & PROG_HEATING && (Mode & PROG0 || Mode & PROG1)){
-        if(0 <= Current_pos < 2){
-          Current_pos++;
-        }
-        else if(Current_pos>=2){
-          Current_pos=0;
-        }
-      }    
-    }
-    // myflags |= option4; // включаем option4  
-    // myflags &= ~option4; // выключаем option4
-    // myflags ^= option4; // включаем или выключаем(ИНВЕРТИРУЕМ) option4 
-    // if (myflags & option4) ... // если option4 установлено - что-нибудь делаем
-    //  if ((mask & value) != 0U)
-    //  {
-    //      value &= ~myflags; clear
-    //  }
-    //**** Сброс бита для вывода устанавливаемой температуры через 3 сек *********
-    if((State&CUR_MES) && (millis()-lastTimeWait > GUI_TIME_DELAY)){
-      State &= ~CUR_MES; // переключения на вывод измеренной температуры
-      State |= HEATING; // Включение нагревателя
-      TableHeat.setState(ON); // State(ON/OFF);
-      lastTimeWait = millis();
-    }
-    if(State&HEATING){ //Запись значения мощности(процентах) в RBDdimmer
-    //delay(10);
-    //TableHeat.setState(ON); //name.setState(ON/OFF);
-    TableHeat.setPower(int(valComputePID));//50
-    delay(100);
-  } 
-
-}
-
-void ModelMenu(menu *Menu, int8_t *mode, int8_t *state, int8_t *cur_pos){
-
-  static long lastTimeProg;
-
-  temp_loop_pntr(&Measured_Temp);// измерение температуры
-  if(State&CUR_MES) {//выбор температуры измереной или устанволеной для вывода на OLED 
-    Temperature = Curr_Temp;
-  }
-  else{
-    Temperature = Measured_Temp;
-  }
-  //***********  Управление температурой PID контролером и Dimmer *****************
-  if(Mode&MANUAL_HEATING){
-    valComputePID = TableHeatPID.compute(Measured_Temp);   
-  } 
-  //**** Установка Curr_temp в зависимости от времерни для режимов PROG0 и PROG1 *********
-  if(((Mode&PROG_HEATING)) && (Mode&PROG0)){
-    if(Prog0[0][0] > millis()-lastTimeProg ){
-      Curr_Temp = Prog0[0][1];
-    }
-    else if(Prog0[0][0] < millis()-lastTimeProg < Prog0[1][0]){
-      Curr_Temp = Prog0[1][1];
-      TableHeatPID.setpoint(Curr_Temp);
-    }
-    else if(Prog0[1][0] < millis()-lastTimeProg < Prog0[2][0]){
-      Curr_Temp = Prog0[2][1];
-      TableHeatPID.setpoint(Curr_Temp);
-    }
-    else if(Prog0[2][0] < millis()-lastTimeProg < Prog0[3][0]){
-      Curr_Temp = Prog0[3][1];
-      TableHeatPID.setpoint(Curr_Temp);
-    }
-    lastTimeProg = millis();
-    valComputePID = TableHeatPID.compute(Measured_Temp);  
-  }
-  if(((Mode&PROG_HEATING)) && (Mode&PROG1)){
-    if(Prog1[0][0] > millis()-lastTimeProg ){
-      Curr_Temp = Prog1[0][1];
-      TableHeatPID.setpoint(Curr_Temp);
-    }
-    else if(Prog1[0][0] < millis()-lastTimeProg < Prog1[1][0]){
-      Curr_Temp = Prog1[1][1];
-      TableHeatPID.setpoint(Curr_Temp);
-    }
-    else if(Prog1[1][0] < millis()-lastTimeProg < Prog1[2][0]){
-      Curr_Temp = Prog1[2][1];
-      TableHeatPID.setpoint(Curr_Temp);
-    }
-    else if(Prog1[2][0] < millis()-lastTimeProg < Prog1[3][0]){
-      Curr_Temp = Prog1[3][1];
-      TableHeatPID.setpoint(Curr_Temp);
-    }
-    lastTimeProg = millis();
-    valComputePID = TableHeatPID.compute(Measured_Temp);  
-  }
+   return FLAG_NOT_PRESS;
 }

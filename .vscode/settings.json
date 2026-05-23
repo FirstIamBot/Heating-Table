@@ -17,5 +17,8 @@
         "adafruit_ssd1306.h": "c",
         "*.tcc": "cpp",
         "system_error": "cpp"
-    }
+    },
+    "cmake.sourceDirectory": "${workspaceFolder}/.pio/libdeps/lolin32/Adafruit BusIO",
+    "idf.port": "/dev/ttyUSB1",
+    "idf.currentSetup": "/home/gena/esp/esp-idf-v5.4"
 }

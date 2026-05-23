@@ -7,36 +7,40 @@
 #include <Fonts/FreeSerif12pt7b.h>
 #include <Fonts/FreeMono9pt7b.h>
 #include <Adafruit_SSD1306.h>
+#include "SPIFFS.h"
+#include <Arduino_JSON.h>
 
 #include <WiFi.h>
-#include <WebServer.h>        // include ESP32 library
-#include "webpage/index.h"
-#include "webpage/dbg.h"
-
 // update from OTA
-
-
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include <AsyncElegantOTA.h>
 
 //*************************  MODE and State working HEAT_TABLE ******************************
 // MODE FLAG's
-#define STANDBAY 0          // режим ожидания
-#define MANUAL_HEATING 1    // режим ручной установка температуры
-#define PROG_HEATING   2    // режим установки температуры по программе
-#define SETTING  4          // настройка
-#define PROG0    8          // SnPb      свинцовый припой
-#define PROG1   16          // Pb-free   безсвинцовый припой
+#define FLAG_STANDBAY 0          // режим ожидания
+#define FLAG_MANUAL_HEATING 1    // режим ручной установка температуры
+#define FLAG_PROG_HEATING   2    // режим установки температуры по программе
+#define FLAG_TEST     4          // настройка(Тест)
+#define FLAG_PROG0    8          // SnPb      свинцовый припой
+#define FLAG_PROG1   16          // Pb-free   безсвинцовый припой
 
 // State FLAG's
-#define HEATING 1  // Флаг включеного нагревателя стола(для вывода на OLED, запись и вычесление PID)
-#define CUR_MES 2  // Флаг вывода температуры: 0 - измереная, 1 - установленая(ручная)
-#define Entrer  4
-
-//#define HEATING_ON  1
-//#define HEATING_OFF 0
+#define FLAG_HEATING 1  // Флаг включеного нагревателя стола(для вывода на OLED, запись и вычесление PID)
+#define FLAG_CUR_MES 2  // Флаг вывода температуры: 0 - измереная, 1 - установленая(ручная)
+#define FLAG_Tracking 4  // Флаг влюченого режима отслеживания заданной температуры
+//*********************************************
+#define time 0
+#define temper 1
+#define pointA 0
+#define pointB 1
+#define pointC 2
+#define pointD 3
+//*********************************************
 // State FLAG's Button Encoder
-#define NOT_PRESS   0   // кнопка не нажата
-#define SHORT_PRESS 1   // короткое нажатие кнопки
-#define LONG_PRESS  2   // длинное нажатие кнопки
+#define FLAG_NOT_PRESS   0   // кнопка не нажата
+#define FLAG_SHORT_PRESS 1   // короткое нажатие кнопки
+#define FLAG_LONG_PRESS  2   // длинное нажатие кнопки
 // Time key pres mSec
 #define SHORT_PRESS_TIME 300    // время короткого нажатия 0,5 сек
 #define LONG_PRESS_TIME  3000   // время длинного нажатия 3 сек
@@ -66,10 +70,18 @@ int MAX6675_CLK = 13; // серый
 #define OUTPUT_PIN 25 
 #define ZEROCROSS  26 
 // ************************ PID controller  settings and gains **********************
-double Kp=10, Ki=3, Kd=3;
-//double Kp=6, Ki=2, Kd=2;
+//double Kp=15, Ki=50, Kd=300;
+double Kp, Kd, Ki;
+double KpTracking, KiTracking, KdTracking;
+int twoZonePID;
+int switchTemp;// 15
+int unitProg;
+int minimize;
+int calibrateTemp = 1;
 // ************************************************************************************* 
 IPAddress IP;
 
+// QuickPID API variables
+extern float pidInput, pidOutput, pidSetpoint;
 
 #endif // end 

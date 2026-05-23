@@ -6,7 +6,7 @@ void initDisplay();
 void DisplayTemp(int16_t x, int16_t y, double *temp);
 void DisplayPwr(int16_t x, int16_t y, double *pwr);
 unsigned char  DisplayTime(unsigned long *tm1, int *tm2);
-void DisplayProg(unsigned char tm ,double *tmp, double *vlCmpuPID);
+void DisplayProg(int16_t tm ,double *tmp, double *vlCmpuPID);
 void DislayLogo(void);
 
 
@@ -41,7 +41,7 @@ void DisplayTemp(int16_t x, int16_t y, double *temp){
     //display.display();
     lastLCDUpdate = millis();
   }
-  display.display();
+  //display.display();
 }
 
 /*
@@ -60,7 +60,7 @@ void DisplayPwr(int16_t x, int16_t y, double *pwr){
     display.print("%");
     lastLCDUpdate = millis();
   }
-  display.display();
+  //display.display();
 }
 /*
   Вывод на OLED  значение Time
@@ -84,7 +84,7 @@ unsigned char  DisplayTime(unsigned long *tm1, int *tm2){
   return tm;
 }
 
-void DisplayProg(unsigned char tm ,double *tmp, double *vlCmpuPID){
+void DisplayProg(int16_t tm ,double *tmp, double *vlCmpuPID){
     display.setFont(&FreeSerif12pt7b);
     display.setTextSize(1);
     display.setTextColor(WHITE); 
