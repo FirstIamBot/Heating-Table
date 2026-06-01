@@ -1,0 +1,17 @@
+{
+  "ip": "10.29.115.213",
+  "kp": 0.05,
+  "ki": 0.0001,
+  "kd": 0.0,
+  "two_zone_enabled": true,
+  "kp_far": 0.0492,
+  "ki_far": 0.0002,
+  "kd_far": 0.0,
+  "kp_near": 0.0132,
+  "ki_near": 0.0001,
+  "kd_near": 0.0,
+  "temp": 260.0,
+  "minimize": 12,
+  "switch_temp": 5,
+  "unit_prog": 600
+}

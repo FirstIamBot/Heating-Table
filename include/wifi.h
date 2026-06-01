@@ -134,11 +134,11 @@ String getStatusReadings(){
     if(Mode&FLAG_PROG_HEATING){
             str += " PROG FLAG_HEATING";
     }
-    if(Mode&FLAG_PROG0){
-            str += " FLAG_PROG0";
+    if(Mode&FLAG_SnPb){
+            str += " FLAG_SnPb";
     }
-    if(Mode&FLAG_PROG1){
-            str += " FLAG_PROG1";
+    if(Mode&FLAG_PbFree){
+            str += " FLAG_PbFree";
     }
     if(Mode&FLAG_TEST){
             str += " FLAG_TEST";
@@ -213,11 +213,16 @@ void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType 
 void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
   AwsFrameInfo *info = (AwsFrameInfo*)arg;
   if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
+        String payload;
+        payload.reserve(len + 1);
+        for (size_t i = 0; i < len; i++) {
+            payload += (char)data[i];
+        }
 
-    //Serial.println((char*)data);
-    JSONVar data_jsn = JSON.parse((char*)data);
+        JSONVar data_jsn = JSON.parse(payload);
     if (JSON.typeof(data_jsn) == "undefined") {
         Serial.println("Parsing input failed!");
+                Serial.println(payload);
         return;
     }
 
@@ -252,8 +257,33 @@ void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
         notifyStartClients();
     }
     if(wsMode == 2){
-        unitProg = data_jsn["unitProg"];
-        notifyStartClientsProg();
+        if (JSON.typeof(data_jsn["unitProg"]) != "undefined") {
+            unitProg = (int)data_jsn["unitProg"];
+        }
+        startProgramByIndex(0);
+        wsreadings="";
+        wsreadings["varStatus"] = "Start";
+        wsreadings["unitProg"] = unitProg;
+        jsonString = JSON.stringify(wsreadings);
+        ws.textAll(jsonString);
+    }
+    if(wsMode == 3){
+        startProgramByIndex(1);
+        wsreadings="";
+        wsreadings["varStatus"] = "Start";
+        wsreadings["unitProg"] = unitProg;
+        jsonString = JSON.stringify(wsreadings);
+        ws.textAll(jsonString);
+    }
+    if(wsMode == 4){
+        setModeManualHeating();
+        Current_pos = 2;
+        tProg = 0;
+        wsreadings="";
+        wsreadings["varStatus"] = "Start";
+        wsreadings["unitProg"] = unitProg;
+        jsonString = JSON.stringify(wsreadings);
+        ws.textAll(jsonString);
     }
 /*
     data[len] = 0;
@@ -277,13 +307,9 @@ void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
 //******************* функции для обработки данных отправляемых сервером **********
 void notifyStartClients() {
 
-    Mode &= ~FLAG_MANUAL_HEATING;
-    Mode &= ~FLAG_PROG_HEATING;
-    Mode &= ~FLAG_PROG1;
-    Mode &= ~FLAG_PROG0;        
+    setModeTest();
     Current_pos = 2;
     tProg=0;
-    Mode |= FLAG_TEST;
 
     wsreadings="";
     wsreadings["varStatus"] = "Start";
@@ -294,10 +320,7 @@ void notifyStartClients() {
 }
 
 void notifyStartClientsProg(){
-    Mode &= ~FLAG_MANUAL_HEATING;
-    Mode |= FLAG_PROG_HEATING;
-    Mode |= FLAG_PROG0;
-    Mode &= ~FLAG_PROG1;        
+    setModeProgramSnPb();
     tProg = 0;
     
     wsreadings="";
@@ -308,11 +331,7 @@ void notifyStartClientsProg(){
 }
 
 void notifyStopClients(){
-    Mode &= ~FLAG_TEST;
-    Mode &= ~FLAG_PROG_HEATING;
-    Mode &= ~FLAG_PROG0;
-    Mode &= ~FLAG_PROG1;
-    Mode |= FLAG_STANDBAY;
+    setModeStandby();
     Current_pos = 2;
     tProg = 0;    
     wsreadings="";

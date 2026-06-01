@@ -23,6 +23,9 @@ from collections import deque
 import time
 import queue
 import numpy as np
+import urllib.request
+import urllib.error
+from pathlib import Path
 
 # ======================== Конфигурация ========================
 CONFIG = {
@@ -131,6 +134,9 @@ class PIDControllerApp:
         self.ws_client = None
         self.connected = False
         self.incoming_data = queue.Queue()
+        self.last_telemetry_monotonic = 0.0
+        self.last_http_poll_monotonic = 0.0
+        self.settings_path = Path(__file__).with_name("pid_controller_settings.json")
         
         # Флаг для автонастройки CHR
         self.auto_tuning = False
@@ -150,12 +156,26 @@ class PIDControllerApp:
         
         # Создание UI
         self.create_ui()
+
+        # Загрузка сохраненных параметров
+        self.load_settings()
         
         # Запуск WebSocket-клиента
         self.connect_ws()
         
         # Обработка закрытия окна
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+    def _coerce_float(self, value, default=0.0):
+        """Преобразует входное значение в float, безопасно обрабатывая None и пустые строки."""
+        if value is None:
+            return float(default)
+        if isinstance(value, str):
+            normalized = value.strip().replace(',', '.')
+            if normalized == "":
+                return float(default)
+            return float(normalized)
+        return float(value)
         
     def create_ui(self):
         """Создание пользовательского интерфейса"""
@@ -292,6 +312,7 @@ class PIDControllerApp:
 
         ttk.Button(control_frame, text="▶ Запустить (TEST)", command=self.start_test).pack(fill=tk.X, pady=5)
         ttk.Button(control_frame, text="⏹ Остановить", command=self.stop_test).pack(fill=tk.X, pady=5)
+        ttk.Button(control_frame, text="💾 Сохранить настройки", command=self.save_settings_with_info).pack(fill=tk.X, pady=5)
         ttk.Button(control_frame, text="⚙ CHR", command=self.auto_tune_chr).pack(fill=tk.X, pady=5)
         ttk.Button(control_frame, text="⚙ PI инерционный (2 зоны)", command=self.tune_inertial_pi).pack(fill=tk.X, pady=5)
         
@@ -308,8 +329,8 @@ class PIDControllerApp:
         self.ax1.set_title("Температура (°C)")
         self.ax1.set_ylabel("Температура")
         self.ax1.grid(True, alpha=0.3)
-        self.line_measured, = self.ax1.plot([], [], label="Измеренная (vMesT)", color='red', linewidth=2)
-        self.line_setpoint, = self.ax1.plot([], [], label="Уставка (vCurrT)", color='blue', linewidth=2)
+        self.line_measured, = self.ax1.plot([], [], label="Измеренная (vMesT)", color='red', linewidth=2, marker='o', markersize=3)
+        self.line_setpoint, = self.ax1.plot([], [], label="Уставка (vCurrT)", color='blue', linewidth=2, marker='o', markersize=3)
         self.ax1.legend(loc='upper left')
         # Текстовый элемент для отображения текущей температуры и крутизны
         self.temp_info_text = self.ax1.text(0.98, 0.98, '', transform=self.ax1.transAxes,
@@ -321,8 +342,8 @@ class PIDControllerApp:
         self.ax2.set_xlabel("Время (сек)")
         self.ax2.set_ylabel("Выход (%)")
         self.ax2.grid(True, alpha=0.3)
-        self.line_output, = self.ax2.plot([], [], label="PID Output (vComputePID)", color='green', linewidth=2)
-        self.line_power, = self.ax2.plot([], [], label="Power (vgetPower)", color='orange', linewidth=1, linestyle='--')
+        self.line_output, = self.ax2.plot([], [], label="PID Output (vComputePID)", color='green', linewidth=2, marker='o', markersize=3)
+        self.line_power, = self.ax2.plot([], [], label="Power (vgetPower)", color='orange', linewidth=1, linestyle='--', marker='o', markersize=3)
         self.ax2.set_ylim([0, 100])
         self.ax2.legend(loc='upper left')
         
@@ -332,6 +353,100 @@ class PIDControllerApp:
         
         # Запуск обновления графика
         self.update_graph()
+
+    def _collect_settings(self):
+        """Собирает текущие настройки для сохранения в файл."""
+        return {
+            "ip": self.ip_entry.get().strip(),
+            "kp": float(self.kp_var.get()),
+            "ki": float(self.ki_var.get()),
+            "kd": float(self.kd_var.get()),
+            "two_zone_enabled": bool(self.two_zone_enabled.get()),
+            "kp_far": float(self.kp_far_var.get()),
+            "ki_far": float(self.ki_far_var.get()),
+            "kd_far": float(self.kd_far_var.get()),
+            "kp_near": float(self.kp_near_var.get()),
+            "ki_near": float(self.ki_near_var.get()),
+            "kd_near": float(self.kd_near_var.get()),
+            "temp": float(self.temp_var.get()),
+            "minimize": int(self.minimize_var.get()),
+            "switch_temp": int(self.switch_var.get()),
+            "unit_prog": int(self.unitprog_var.get()),
+        }
+
+    def _apply_settings(self, settings):
+        """Применяет настройки из словаря к UI-переменным."""
+        if "ip" in settings:
+            self.ip_entry.delete(0, tk.END)
+            self.ip_entry.insert(0, str(settings["ip"]))
+
+        if "kp" in settings:
+            self.kp_var.set(float(settings["kp"]))
+        if "ki" in settings:
+            self.ki_var.set(float(settings["ki"]))
+        if "kd" in settings:
+            self.kd_var.set(float(settings["kd"]))
+
+        if "two_zone_enabled" in settings:
+            self.two_zone_enabled.set(bool(settings["two_zone_enabled"]))
+
+        if "kp_far" in settings:
+            self.kp_far_var.set(float(settings["kp_far"]))
+        if "ki_far" in settings:
+            self.ki_far_var.set(float(settings["ki_far"]))
+        if "kd_far" in settings:
+            self.kd_far_var.set(float(settings["kd_far"]))
+
+        if "kp_near" in settings:
+            self.kp_near_var.set(float(settings["kp_near"]))
+        if "ki_near" in settings:
+            self.ki_near_var.set(float(settings["ki_near"]))
+        if "kd_near" in settings:
+            self.kd_near_var.set(float(settings["kd_near"]))
+
+        if "temp" in settings:
+            self.temp_var.set(float(settings["temp"]))
+        if "minimize" in settings:
+            self.minimize_var.set(int(settings["minimize"]))
+        if "switch_temp" in settings:
+            self.switch_var.set(int(settings["switch_temp"]))
+        if "unit_prog" in settings:
+            self.unitprog_var.set(int(settings["unit_prog"]))
+
+    def load_settings(self):
+        """Загружает настройки из JSON-файла, если он существует."""
+        if not self.settings_path.exists():
+            return
+
+        try:
+            settings = json.loads(self.settings_path.read_text(encoding="utf-8"))
+            if isinstance(settings, dict):
+                self._apply_settings(settings)
+                print(f"✓ Настройки загружены из {self.settings_path}")
+        except Exception as e:
+            print(f"✗ Не удалось загрузить настройки: {e}")
+
+    def save_settings(self, show_message=False):
+        """Сохраняет текущие настройки в JSON-файл."""
+        try:
+            settings = self._collect_settings()
+            self.settings_path.write_text(
+                json.dumps(settings, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            if show_message:
+                messagebox.showinfo("Настройки", f"Настройки сохранены в:\n{self.settings_path}")
+            return True
+        except Exception as e:
+            if show_message:
+                messagebox.showerror("Ошибка", f"Не удалось сохранить настройки:\n{e}")
+            else:
+                print(f"✗ Не удалось сохранить настройки: {e}")
+            return False
+
+    def save_settings_with_info(self):
+        """Обработчик кнопки сохранения настроек."""
+        self.save_settings(show_message=True)
     
     def connect_ws(self):
         """Подключение к WebSocket"""
@@ -370,17 +485,35 @@ class PIDControllerApp:
             if not any(k in data for k in ("vCurrT", "vMesT", "vComputePID", "vgetPower", "vtProg")):
                 return
 
+            self.last_telemetry_monotonic = time.monotonic()
+
             if self.start_time is None:
                 self.start_time = time.time()
             
             elapsed_time = time.time() - self.start_time
-            
-            self.data_buffer['time'].append(elapsed_time)
-            self.data_buffer['vCurrT'].append(float(data.get('vCurrT', 0)))
-            self.data_buffer['vMesT'].append(float(data.get('vMesT', 0)))
-            self.data_buffer['vComputePID'].append(float(data.get('vComputePID', 0)))
-            self.data_buffer['vgetPower'].append(float(data.get('vgetPower', 0)))
-            self.data_buffer['vtProg'].append(float(data.get('vtProg', 0)))
+            vt_prog = data.get('vtProg', None)
+            # Для графика времени используем прогресс программы с ESP,
+            # чтобы ось совпадала с Unit Prog. Если данных нет - fallback на локальное время.
+            if vt_prog is None or vt_prog == "":
+                time_value = elapsed_time
+                vt_prog_value = elapsed_time
+            else:
+                vt_prog_value = self._coerce_float(vt_prog, elapsed_time)
+                time_value = vt_prog_value
+
+            curr_temp = self._coerce_float(data.get('vCurrT', 0))
+            measured_temp = self._coerce_float(data.get('vMesT', 0))
+            pid_output = self._coerce_float(data.get('vComputePID', 0))
+            power = self._coerce_float(data.get('vgetPower', 0))
+
+            # Добавляем точки только после успешной нормализации всех значений,
+            # чтобы длины буферов всегда оставались одинаковыми.
+            self.data_buffer['time'].append(time_value)
+            self.data_buffer['vCurrT'].append(curr_temp)
+            self.data_buffer['vMesT'].append(measured_temp)
+            self.data_buffer['vComputePID'].append(pid_output)
+            self.data_buffer['vgetPower'].append(power)
+            self.data_buffer['vtProg'].append(vt_prog_value)
         except Exception as e:
             print(f"✗ Ошибка обработки данных: {e}")
 
@@ -398,6 +531,59 @@ class PIDControllerApp:
         for key in self.data_buffer:
             self.data_buffer[key].clear()
         self.start_time = None
+        self.last_telemetry_monotonic = 0.0
+        self.last_http_poll_monotonic = 0.0
+
+        self.line_measured.set_data([], [])
+        self.line_setpoint.set_data([], [])
+        self.line_output.set_data([], [])
+        self.line_power.set_data([], [])
+
+        x_max = self.get_plot_time_limit()
+        self.ax1.set_xlim([0, x_max])
+        self.ax2.set_xlim([0, x_max])
+        self.ax1.set_ylim([0, 300])
+        self.ax2.set_ylim([0, 100])
+        self.temp_info_text.set_text('')
+        self.canvas.draw()
+
+    def build_http_base_url(self):
+        """Строит базовый HTTP URL из адреса, введенного для WebSocket."""
+        ip = self.ip_entry.get().strip()
+        if ip.startswith("ws://"):
+            ip = ip[5:]
+        if ip.endswith("/ws"):
+            ip = ip[:-3]
+        if ip.startswith("http://"):
+            return ip.rstrip('/')
+        return f"http://{ip.rstrip('/')}"
+
+    def poll_http_telemetry(self):
+        """Резервное чтение текущей телеметрии по HTTP, если WS временно молчит."""
+        now = time.monotonic()
+        if now - self.last_http_poll_monotonic < 0.8:
+            return
+
+        self.last_http_poll_monotonic = now
+        base_url = self.build_http_base_url()
+
+        try:
+            with urllib.request.urlopen(f"{base_url}/tempurl", timeout=0.35) as response:
+                temp_payload = json.loads(response.read().decode("utf-8"))
+
+            with urllib.request.urlopen(f"{base_url}/gdbvarurl", timeout=0.35) as response:
+                debug_payload = json.loads(response.read().decode("utf-8"))
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
+            return
+
+        fallback_payload = {
+            "vCurrT": temp_payload.get("varCurrT", 0),
+            "vMesT": temp_payload.get("varMesT", 0),
+            "vComputePID": temp_payload.get("varComputePID", 0),
+            "vgetPower": debug_payload.get("vargetPower", 0),
+            "vtProg": debug_payload.get("vartProg", 0),
+        }
+        self.handle_ws_message(fallback_payload)
 
     def _safe_get_float(self, var, field_name):
         """Безопасно считывает число из Tk-переменной, поддерживая ',' и '.'."""
@@ -448,22 +634,43 @@ class PIDControllerApp:
         
         temp_diff = temp_points[-1] - temp_points[0]
         return temp_diff / time_diff
+
+    def get_plot_time_limit(self):
+        """Максимум оси X берется из Unit Prog, с безопасным fallback."""
+        try:
+            unit_prog = int(float(self.unitprog_var.get()))
+            if unit_prog > 0:
+                return unit_prog
+        except Exception:
+            pass
+        return 600
     
     def update_graph(self):
         """Обновление графика"""
         try:
             self.drain_incoming_data()
 
+            now = time.monotonic()
+            if self.connected and (now - self.last_telemetry_monotonic > 1.2):
+                self.poll_http_telemetry()
+
+            x_max = self.get_plot_time_limit()
+            self.ax1.set_xlim([0, x_max])
+            self.ax2.set_xlim([0, x_max])
+
             if len(self.data_buffer['time']) > 0:
                 # График 1: Температура
                 self.line_measured.set_data(self.data_buffer['time'], self.data_buffer['vMesT'])
                 self.line_setpoint.set_data(self.data_buffer['time'], self.data_buffer['vCurrT'])
-                
-                if len(self.data_buffer['time']) > 1:
-                    self.ax1.set_xlim([0, max(self.data_buffer['time'])])
-                    temps = list(self.data_buffer['vMesT']) + list(self.data_buffer['vCurrT'])
-                    if temps:
-                        self.ax1.set_ylim([min(temps) - 10, max(temps) + 10])
+
+                temps = list(self.data_buffer['vMesT']) + list(self.data_buffer['vCurrT'])
+                if temps:
+                    min_temp = min(temps)
+                    max_temp = max(temps)
+                    if min_temp == max_temp:
+                        self.ax1.set_ylim([min_temp - 10, max_temp + 10])
+                    else:
+                        self.ax1.set_ylim([min_temp - 10, max_temp + 10])
                 
                 # Обновление текста с текущей температурой и крутизной
                 current_temp = self.data_buffer['vMesT'][-1] if self.data_buffer['vMesT'] else 0.0
@@ -474,11 +681,13 @@ class PIDControllerApp:
                 # График 2: PID выход
                 self.line_output.set_data(self.data_buffer['time'], self.data_buffer['vComputePID'])
                 self.line_power.set_data(self.data_buffer['time'], self.data_buffer['vgetPower'])
-                
-                if len(self.data_buffer['time']) > 1:
-                    self.ax2.set_xlim([0, max(self.data_buffer['time'])])
-                
-                self.canvas.draw_idle()
+            else:
+                self.line_measured.set_data([], [])
+                self.line_setpoint.set_data([], [])
+                self.line_output.set_data([], [])
+                self.line_power.set_data([], [])
+
+            self.canvas.draw()
         except Exception as e:
             print(f"✗ Ошибка обновления графика: {e}")
         
@@ -841,6 +1050,7 @@ class PIDControllerApp:
     
     def on_closing(self):
         """Обработка закрытия окна"""
+        self.save_settings(show_message=False)
         if self.ws_client:
             self.ws_client.stop()
         self.root.destroy()
@@ -848,5 +1058,5 @@ class PIDControllerApp:
 # ======================== Главная функция ========================
 if __name__ == "__main__":
     root = tk.Tk()
-    app = PIDControllerApp(root, ws_uri="ws://10.207.40.213/ws")
+    app = PIDControllerApp(root, ws_uri="ws://10.29.115.213/ws")
     root.mainloop()

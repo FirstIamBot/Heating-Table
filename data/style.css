@@ -28,6 +28,52 @@ body {
     background-color: white;
     box-shadow: 2px 2px 12px 1px rgba(140,140,140,.5);
 }
+
+.mode-buttons {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(120px, 1fr));
+    gap: 10px;
+    margin: 12px 0 16px;
+}
+
+.mode-btn {
+    border: none;
+    border-radius: 10px;
+    padding: 12px 10px;
+    font-size: 0.95rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    color: #f8fafc;
+    background: linear-gradient(135deg, #0f766e, #14532d);
+    box-shadow: 0 6px 18px rgba(15, 118, 110, 0.22);
+    cursor: pointer;
+}
+
+.mode-btn:nth-child(2) {
+    background: linear-gradient(135deg, #7c2d12, #b45309);
+    box-shadow: 0 6px 18px rgba(180, 83, 9, 0.22);
+}
+
+.mode-btn:nth-child(3) {
+    background: linear-gradient(135deg, #1d4ed8, #0f766e);
+    box-shadow: 0 6px 18px rgba(29, 78, 216, 0.22);
+}
+
+.mode-btn:nth-child(4) {
+    background: linear-gradient(135deg, #6b7280, #111827);
+    box-shadow: 0 6px 18px rgba(17, 24, 39, 0.22);
+}
+
+.mode-btn:active {
+    transform: translateY(1px);
+}
+
+.mode-btn.is-active {
+    outline: 3px solid #22c55e;
+    outline-offset: 1px;
+    filter: saturate(1.2) brightness(1.05);
+    box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.25), 0 10px 24px rgba(0, 0, 0, 0.2);
+}
 .card-title {
     font-size: 1.2rem;
     font-weight: bold;

@@ -22,8 +22,8 @@
 #define FLAG_MANUAL_HEATING 1    // режим ручной установка температуры
 #define FLAG_PROG_HEATING   2    // режим установки температуры по программе
 #define FLAG_TEST     4          // настройка(Тест)
-#define FLAG_PROG0    8          // SnPb      свинцовый припой
-#define FLAG_PROG1   16          // Pb-free   безсвинцовый припой
+#define FLAG_SnPb    8          // SnPb      свинцовый припой
+#define FLAG_PbFree   16          // Pb-free   безсвинцовый припой
 
 // State FLAG's
 #define FLAG_HEATING 1  // Флаг включеного нагревателя стола(для вывода на OLED, запись и вычесление PID)
@@ -78,10 +78,39 @@ int switchTemp;// 15
 int unitProg;
 int minimize;
 int calibrateTemp = 1;
+
+// SnPb profile: time boundaries, s
+const int SNPB_T_PREHEAT_END  = 200;  // было 140
+const int SNPB_T_REFLOW_END   = 400;  // было 240 — даём 200 сек на разгон
+const int SNPB_T_PEAK_END     = 520;  // было 440
+const int SNPB_T_COOL_END     = 680;  // было 600 — подбирается под реальный стол
+
+// SnPb profile: target temperatures, C
+const int SNPB_TEMP_PREHEAT = 140;
+const int SNPB_TEMP_REFLOW = 235;
+const int SNPB_TEMP_COOL = 150;
+
+// Pb-free profile: time boundaries, s
+const int PBFREE_T_PREHEAT_END = 240;
+const int PBFREE_T_REFLOW_END = 340;
+const int PBFREE_T_PEAK_END = 380;
+const int PBFREE_T_COOL_END = 600;
+
+// Pb-free profile: target temperatures, C
+const int PBFREE_TEMP_PREHEAT = 140;
+const int PBFREE_TEMP_REFLOW = 260;
+const int PBFREE_TEMP_COOL = 150;
 // ************************************************************************************* 
 IPAddress IP;
 
 // QuickPID API variables
 extern float pidInput, pidOutput, pidSetpoint;
+
+void setModeStandby(void);
+void setModeManualHeating(void);
+void setModeProgramSnPb(void);
+void setModeProgramPbFree(void);
+void startProgramByIndex(int index);
+void setModeTest(void);
 
 #endif // end 

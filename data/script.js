@@ -213,6 +213,7 @@ function reloadStatus()          // update debug
           var obj = JSON.parse(this.responseText);
           document.getElementById('varMode').innerHTML = obj.varMode;
           document.getElementById('varStatus').innerHTML = obj.varStatus;
+                    updateModeButtons(obj.varMode);
         }
     };
     xhr.open('GET', '/statusurl', true);
@@ -325,6 +326,14 @@ function onMessage(event) {
         }
     }
 
+    if (payload.varMode) {
+        const modeNode = document.getElementById('varMode');
+        if (modeNode) {
+            modeNode.textContent = payload.varMode;
+        }
+        updateModeButtons(payload.varMode);
+    }
+
     if (payload.vgetPower !== undefined) {
         const powerNode = document.getElementById('vargetPower');
         if (powerNode) {
@@ -338,9 +347,51 @@ function onMessage(event) {
 // ----------------------------------------------------------------------------
 
 function initButton() {
-    document.getElementById('toggle').addEventListener('click', onToggle);
+    bindModeButton('modeStandbay', 0);
+    bindModeButton('modeSnPb', 2);
+    bindModeButton('modePbFree', 3);
+    bindModeButton('modeManual', 4);
 }
 
-function onToggle(event) {
-    websocket.send('toggle');
+function bindModeButton(id, startValue) {
+    const button = document.getElementById(id);
+    if (!button) {
+        return;
+    }
+
+    button.addEventListener('click', function () {
+        sendModeCommand(startValue);
+    });
+}
+
+function sendModeCommand(startValue) {
+    if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+        return;
+    }
+
+    websocket.send(JSON.stringify({ Start: startValue }));
+}
+
+function updateModeButtons(modeText) {
+    const modeStr = String(modeText || '');
+
+    const modeMap = {
+        modeStandbay: modeStr.indexOf('FLAG_STANDBAY') !== -1,
+        modeManual: modeStr.indexOf('MANUAL') !== -1,
+        modeSnPb: modeStr.indexOf('FLAG_SnPb') !== -1,
+        modePbFree: modeStr.indexOf('FLAG_PbFree') !== -1
+    };
+
+    Object.keys(modeMap).forEach(function (id) {
+        const button = document.getElementById(id);
+        if (!button) {
+            return;
+        }
+
+        if (modeMap[id]) {
+            button.classList.add('is-active');
+        } else {
+            button.classList.remove('is-active');
+        }
+    });
 }
