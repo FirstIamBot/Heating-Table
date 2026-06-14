@@ -23,7 +23,7 @@ AsyncWebSocket ws("/ws");
 // Variable to store the HTTP request 
 String jsonString;
 String str, status_str, wsstr;
-JSONVar readings, wsreadings;
+JSONVar data_jsn, readings, wsreadings;
 
 //******************************* Extern variable *******************
 extern double Measured_Temp, Curr_Temp, valComputePID, OutputVal;
@@ -47,15 +47,65 @@ String getStatusReadings();
 String getTempReadings();
 String getGdbvarReadings();
 //******************************** WebSocket Handle ******************
-void initWebSocket(void);
-void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type,
-             void *arg, uint8_t *data, size_t len);
-void handleWebSocketMessage(void *arg, uint8_t *data, size_t len);
-void notifyClients();
-void notifyLogClients(const String &message);
-void notifyStartClients();
-void notifyStopClients();
-void notifyStartClientsProg();
+
+//******************* функции для обработки данных отправляемых сервером **********
+void notifyStartClients() {
+
+    setModeTest();
+    Current_pos = 2;
+    tProg=0;
+
+    wsreadings="";
+    wsreadings["varStatus"] = "Start";
+    wsreadings["unitProg"] = unitProg;
+    jsonString = JSON.stringify(wsreadings);
+    ws.textAll(jsonString);
+}
+
+void notifyStartClientsProg(){
+    setModeProgramSnPb();
+    tProg = 0;
+    
+    wsreadings="";
+    wsreadings["varStatus"] = "Start";
+    wsreadings["unitProg"] = unitProg;
+    jsonString = JSON.stringify(wsreadings);
+    ws.textAll(jsonString);
+}
+
+void notifyStopClients(){
+    setModeStandby();
+    Current_pos = 2;
+    tProg = 0;    
+    wsreadings="";
+    wsreadings["varStatus"] = "Stop";
+    jsonString = JSON.stringify(wsreadings);
+    ws.textAll(jsonString);
+}
+
+void notifyClients() {
+    wsreadings="";
+    wsreadings["vCurrT"] = Curr_Temp;
+    wsreadings["vMesT"] = Measured_Temp;
+    wsreadings["vtProg"] = tProg;      
+    wsreadings["vComputePID"] = valComputePID;
+    wsreadings["vgetPower"] = getPower;  
+    jsonString = JSON.stringify(wsreadings);
+    ws.textAll(jsonString);
+}
+
+void notifyLogClients(const String &message) {
+    if (ws.count() == 0) {
+        return;
+    }
+    JSONVar logReadings;
+    logReadings["type"] = "log";
+    logReadings["message"] = message;
+    logReadings["uptimeMs"] = (double)millis();
+    String logJson = JSON.stringify(logReadings);
+    ws.textAll(logJson);
+}
+
 //********************* WiFI ****************************
 void initWIFI(void){
     // Connect to Wi-Fi network with SSID and password
@@ -126,33 +176,33 @@ String getTempReadings(){
 String getStatusReadings(){
     str=" ";
     if(Mode == 0){
-        str += " FLAG_STANDBAY ";
+        str += " MODE_FLAG_STANDBAY ";
     }
-    if(Mode&FLAG_MANUAL_HEATING){
-            str += " MANUAL FLAG_HEATING";
+    if(Mode&MODE_FLAG_MANUAL_HEATING){
+            str += " MANUAL STATUS_FLAG_HEATING";
     }
-    if(Mode&FLAG_PROG_HEATING){
-            str += " PROG FLAG_HEATING";
+    if(Mode&MODE_FLAG_PROG_HEATING){
+            str += " PROG STATUS_FLAG_HEATING";
     }
-    if(Mode&FLAG_SnPb){
-            str += " FLAG_SnPb";
+    if(Mode&MODE_FLAG_SnPb){
+            str += " MODE_FLAG_SnPb";
     }
-    if(Mode&FLAG_PbFree){
-            str += " FLAG_PbFree";
+    if(Mode&MODE_FLAG_PbFree){
+            str += " MODE_FLAG_PbFree";
     }
-    if(Mode&FLAG_TEST){
-            str += " FLAG_TEST";
+    if(Mode&MODE_FLAG_TEST){
+            str += " MODE_FLAG_TEST";
     }
     readings["varMode"] = str;
     status_str=" ";
-    if(State&FLAG_HEATING){
-            status_str += " FLAG_HEATING ";
+    if(State&STATUS_FLAG_HEATING){
+            status_str += " STATUS_FLAG_HEATING ";
     }
-    if(State&FLAG_CUR_MES){
-            status_str += " FLAG_CUR_MES ";
+    if(State&STATUS_FLAG_CUR_MES){
+            status_str += " STATUS_FLAG_CUR_MES ";
     }   
-    if(State&FLAG_Tracking){
-            status_str += " FLAG_Tracking ";
+    if(State&STATUS_FLAG_Tracking){
+            status_str += " STATUS_FLAG_Tracking ";
     }       
     readings["varStatus"] = status_str;
     jsonString = JSON.stringify(readings);
@@ -172,43 +222,6 @@ String getGdbvarReadings(){
     return jsonString;
 }
 
-//************************* WebSocket ***********************************
-void initWebSocket(void) {
-  ws.onEvent(onEvent);
-  server.addHandler(&ws);
-  Serial.println("WebSocket started");
-    notifyLogClients("WebSocket started");
-}
-
-//******************* Чтение данных от клиент ws *************************************
-void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type,
-             void *arg, uint8_t *data, size_t len) {
-  switch (type) {
-    case WS_EVT_CONNECT:
-        Serial.printf("ws[%s][%u] connect\n", server->url(), client->id());
-        Serial.printf("WebSocket client #%u connected from %s\n", client->id(), client->remoteIP().toString().c_str());
-        notifyLogClients("WebSocket client #" + String(client->id()) + " connected from " + client->remoteIP().toString());
-        //client->printf("Hello Client %s :)", client->remoteIP().toString().c_str());
-        // ws.text(client->id(), led.getState() == LOW ? "on" : "off"); //onboard_led.on ? "on" : "off"
-        // client->ping();
-        break;
-    case WS_EVT_DISCONNECT:
-        Serial.printf("ws[%s][%u] disconnect\n", server->url(), client->id());
-        Serial.printf("WebSocket client #%u disconnected\n", client->id());
-        notifyLogClients("WebSocket client #" + String(client->id()) + " disconnected");
-        break;
-    case WS_EVT_ERROR:
-        Serial.printf("ws[%s][%u] error(%u): %s\n", server->url(), client->id(), *((uint16_t *)arg), (char *)data);
-        break;
-    case WS_EVT_PONG:
-        Serial.printf("ws[%s][%u] pong[%u]: %s\n", server->url(), client->id(), len, (len) ? (char *)data : "");
-        break;
-    case WS_EVT_DATA:
-        Serial.printf("data from %s :\n", client->remoteIP().toString().c_str());
-        handleWebSocketMessage(arg, data, len);
-        break;
-  }
-}
 //******************* функция для обработки сообщений, полученных от клента **********
 void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
   AwsFrameInfo *info = (AwsFrameInfo*)arg;
@@ -219,7 +232,7 @@ void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
             payload += (char)data[i];
         }
 
-        JSONVar data_jsn = JSON.parse(payload);
+    data_jsn = JSON.parse(payload);
     if (JSON.typeof(data_jsn) == "undefined") {
         Serial.println("Parsing input failed!");
                 Serial.println(payload);
@@ -285,83 +298,43 @@ void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
         jsonString = JSON.stringify(wsreadings);
         ws.textAll(jsonString);
     }
-/*
-    data[len] = 0;
-    if (strcmp((char*)data, "Start") == 0) {
-        Serial.println("Start");
-        notifyStartClients();
-        return;
-    }
-    if (strcmp((char*)data, "Stop") == 0) {
-        Serial.println("Stop");
-        notifyStopClients();
-        return;
-    }
-    if (strcmp((char*)data, "8") == 0) {
-        Serial.println("8");
-        return;
-    }
-*/
   }
 }
-//******************* функции для обработки данных отправляемых сервером **********
-void notifyStartClients() {
 
-    setModeTest();
-    Current_pos = 2;
-    tProg=0;
-
-    wsreadings="";
-    wsreadings["varStatus"] = "Start";
-    wsreadings["unitProg"] = unitProg;
-    jsonString = JSON.stringify(wsreadings);
-    ws.textAll(jsonString);
-
+//******************* Чтение данных от клиент ws *************************************
+void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type,
+             void *arg, uint8_t *data, size_t len) {
+  switch (type) {
+    case WS_EVT_CONNECT:
+        Serial.printf("ws[%s][%u] connect\n", server->url(), client->id());
+        Serial.printf("WebSocket client #%u connected from %s\n", client->id(), client->remoteIP().toString().c_str());
+        notifyLogClients("WebSocket client #" + String(client->id()) + " connected from " + client->remoteIP().toString());;
+        break;
+    case WS_EVT_DISCONNECT:
+        Serial.printf("ws[%s][%u] disconnect\n", server->url(), client->id());
+        Serial.printf("WebSocket client #%u disconnected\n", client->id());
+        notifyLogClients("WebSocket client #" + String(client->id()) + " disconnected");
+        break;
+    case WS_EVT_ERROR:
+        Serial.printf("ws[%s][%u] error(%u): %s\n", server->url(), client->id(), *((uint16_t *)arg), (char *)data);
+        break;
+    case WS_EVT_PONG:
+        Serial.printf("ws[%s][%u] pong[%u]: %s\n", server->url(), client->id(), len, (len) ? (char *)data : "");
+        break;
+    case WS_EVT_DATA:
+        Serial.printf("data from %s :\n", client->remoteIP().toString().c_str());
+        handleWebSocketMessage(arg, data, len);
+        break;
+  }
+}
+//************************* WebSocket ***********************************
+void initWebSocket(void) {
+  ws.onEvent(onEvent);
+  server.addHandler(&ws);
+  Serial.println("WebSocket started");
+    notifyLogClients("WebSocket started");
 }
 
-void notifyStartClientsProg(){
-    setModeProgramSnPb();
-    tProg = 0;
-    
-    wsreadings="";
-    wsreadings["varStatus"] = "Start";
-    wsreadings["unitProg"] = unitProg;
-    jsonString = JSON.stringify(wsreadings);
-    ws.textAll(jsonString);
-}
-
-void notifyStopClients(){
-    setModeStandby();
-    Current_pos = 2;
-    tProg = 0;    
-    wsreadings="";
-    wsreadings["varStatus"] = "Stop";
-    jsonString = JSON.stringify(wsreadings);
-    ws.textAll(jsonString);
-}
-
-void notifyClients() {
-    wsreadings="";
-    wsreadings["vCurrT"] = Curr_Temp;
-    wsreadings["vMesT"] = Measured_Temp;
-    wsreadings["vtProg"] = tProg;      
-    wsreadings["vComputePID"] = valComputePID;
-    wsreadings["vgetPower"] = getPower;  
-    jsonString = JSON.stringify(wsreadings);
-    ws.textAll(jsonString);
-}
-
-void notifyLogClients(const String &message) {
-    if (ws.count() == 0) {
-        return;
-    }
-    JSONVar logReadings;
-    logReadings["type"] = "log";
-    logReadings["message"] = message;
-    logReadings["uptimeMs"] = (double)millis();
-    String logJson = JSON.stringify(logReadings);
-    ws.textAll(logJson);
-}
 
 
 

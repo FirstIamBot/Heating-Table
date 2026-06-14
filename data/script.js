@@ -376,10 +376,10 @@ function updateModeButtons(modeText) {
     const modeStr = String(modeText || '');
 
     const modeMap = {
-        modeStandbay: modeStr.indexOf('FLAG_STANDBAY') !== -1,
+        modeStandbay: modeStr.indexOf('MODE_FLAG_STANDBAY') !== -1,
         modeManual: modeStr.indexOf('MANUAL') !== -1,
-        modeSnPb: modeStr.indexOf('FLAG_SnPb') !== -1,
-        modePbFree: modeStr.indexOf('FLAG_PbFree') !== -1
+        modeSnPb: modeStr.indexOf('MODE_FLAG_SnPb') !== -1,
+        modePbFree: modeStr.indexOf('MODE_FLAG_PbFree') !== -1
     };
 
     Object.keys(modeMap).forEach(function (id) {

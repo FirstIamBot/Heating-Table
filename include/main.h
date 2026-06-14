@@ -18,25 +18,17 @@
 
 //*************************  MODE and State working HEAT_TABLE ******************************
 // MODE FLAG's
-#define FLAG_STANDBAY 0          // режим ожидания
-#define FLAG_MANUAL_HEATING 1    // режим ручной установка температуры
-#define FLAG_PROG_HEATING   2    // режим установки температуры по программе
-#define FLAG_TEST     4          // настройка(Тест)
-#define FLAG_SnPb    8          // SnPb      свинцовый припой
-#define FLAG_PbFree   16          // Pb-free   безсвинцовый припой
+#define MODE_FLAG_STANDBAY 0          // режим ожидания
+#define MODE_FLAG_MANUAL_HEATING 1    // режим ручной установка температуры
+#define MODE_FLAG_PROG_HEATING   2    // режим установки температуры по программе
+#define MODE_FLAG_TEST     4          // настройка(Тест)
+#define MODE_FLAG_SnPb    8          // SnPb      свинцовый припой
+#define MODE_FLAG_PbFree   16          // Pb-free   безсвинцовый припой
 
 // State FLAG's
-#define FLAG_HEATING 1  // Флаг включеного нагревателя стола(для вывода на OLED, запись и вычесление PID)
-#define FLAG_CUR_MES 2  // Флаг вывода температуры: 0 - измереная, 1 - установленая(ручная)
-#define FLAG_Tracking 4  // Флаг влюченого режима отслеживания заданной температуры
-//*********************************************
-#define time 0
-#define temper 1
-#define pointA 0
-#define pointB 1
-#define pointC 2
-#define pointD 3
-//*********************************************
+#define STATUS_FLAG_HEATING 1  // Флаг включеного нагревателя стола(для вывода на OLED, запись и вычесление PID)
+#define STATUS_FLAG_CUR_MES 2  // Флаг вывода температуры: 0 - измереная, 1 - установленая(ручная)
+#define STATUS_FLAG_Tracking 4  // Флаг влюченого режима отслеживания заданной температуры
 // State FLAG's Button Encoder
 #define FLAG_NOT_PRESS   0   // кнопка не нажата
 #define FLAG_SHORT_PRESS 1   // короткое нажатие кнопки
@@ -70,11 +62,10 @@ int MAX6675_CLK = 13; // серый
 #define OUTPUT_PIN 25 
 #define ZEROCROSS  26 
 // ************************ PID controller  settings and gains **********************
-//double Kp=15, Ki=50, Kd=300;
 double Kp, Kd, Ki;
 double KpTracking, KiTracking, KdTracking;
 int twoZonePID;
-int switchTemp;// 15
+int switchTemp;
 int unitProg;
 int minimize;
 int calibrateTemp = 1;
