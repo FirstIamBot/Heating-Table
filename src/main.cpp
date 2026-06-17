@@ -161,9 +161,9 @@ void setup() {
   logWifi("RotaryEncoder init");
   // ***************************    PID regulator    **************************
   pidSetpoint = (float)Curr_Temp;
-  Kp=0.6827, Ki=0.0001, Kd=0.0;
+  Kp=0.7897, Ki=0.0098, Kd=0.0;
   // Near-setpoint defaults for inertial heater (can be overridden via WebSocket)
-  KpTracking = 0.1792, KiTracking = 0.0004, KdTracking = 0.0;
+  KpTracking = 0.1892, KiTracking = 0.0004, KdTracking = 0.0;
   twoZonePID = 1;
   switchTemp=3;
 
@@ -179,7 +179,7 @@ void setup() {
   setModeStandby();
   State= 0;
   unitProg = 600;
-  minimize=5;
+  minimize=9;
 }
 //***********************************************************************
 void loop() {
@@ -403,6 +403,7 @@ void model_loop(void){
   }     
   if(State&STATUS_FLAG_HEATING){ //
     static unsigned long lastPowerLogMs = 0;
+    //-------------------------------------------------------------------------------------------------
     // Вычисляем ошибку до выбора зоны регулирования.
     deltaTemp = (int16_t)(Curr_Temp - Measured_Temp);
     // Переходим в tracking только вблизи уставки при подходе снизу.
@@ -410,7 +411,7 @@ void model_loop(void){
     // иначе нагрев не может стабилизироваться.
     if ((deltaTemp > 0) && (deltaTemp <= switchTemp)) {
       if (twoZonePID == 1) {
-        TableHeatPID.SetTunings((float)KpTracking, (float)KiTracking, (float)KdTracking);
+       TableHeatPID.SetTunings((float)KpTracking, (float)KiTracking, (float)KdTracking);
       } else {
         TableHeatPID.SetTunings((float)Kp, (float)Ki, (float)Kd);
       }
@@ -418,7 +419,7 @@ void model_loop(void){
       State |= STATUS_FLAG_Tracking;
     }
     else {
-      // В разгонной зоне и при перелете разрешаем нулевую мощность.
+    // В разгонной зоне и при перелете разрешаем нулевую мощность.
       if ((deltaTemp <= 0) && twoZonePID == 1) {
         TableHeatPID.SetTunings((float)KpTracking, (float)KiTracking, (float)KdTracking);
       } else {
@@ -427,6 +428,31 @@ void model_loop(void){
       TableHeatPID.SetOutputLimits(0, 100); // full range: 0..100%
       State &= ~STATUS_FLAG_Tracking;
     }
+    //-------------------------------------------------------------------------------------------------
+    //-------------------------------------------------------------------------------------------------
+    /*
+    deltaTemp = (int16_t)(Curr_Temp - Measured_Temp);
+    if ((deltaTemp > 0) && (deltaTemp <= switchTemp)) {
+      if (twoZonePID == 1) {
+        State |= STATUS_FLAG_Tracking;
+      }       
+    }
+    else {
+      // В разгонной зоне и при перелете разрешаем нулевую мощность.
+      State &= ~STATUS_FLAG_Tracking;
+    }
+
+    if(State&STATUS_FLAG_Tracking){
+      TableHeatPID.SetTunings((float)KpTracking, (float)KiTracking, (float)KdTracking);
+      TableHeatPID.SetOutputLimits((float)minimize, 100); // tracking mode: min..100%
+    }
+    else{
+      TableHeatPID.SetTunings((float)Kp, (float)Ki, (float)Kd);
+      TableHeatPID.SetOutputLimits((float)minimize, 100); // tracking mode: min..100%
+    }    
+    */
+
+    //-------------------------------------------------------------------------------------------------
     // Пересчет PID после выбора текущей зоны.
     TableHeatPID.Compute();
     valComputePID = pidOutput;

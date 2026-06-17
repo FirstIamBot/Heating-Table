@@ -2,9 +2,8 @@
 
 #include "main.h"
 
-
-//#define STA // For WIFI_STA   Доступ через локальную сеть
-#define STA // For WIFI_AP    Точка доступа
+#define STA 
+//#define AP 
 #define HTTP_PORT 80
 
 #ifdef STA    
@@ -158,7 +157,7 @@ void initWebServer(){
         json = String();
     });
     server.serveStatic("/", SPIFFS, "/");
-    // Start ElegantOTA
+
     AsyncElegantOTA.begin(&server);    // Start ElegantOTA
     server.begin();
     Serial.println("HTTP server started");
