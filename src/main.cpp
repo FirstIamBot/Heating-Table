@@ -161,7 +161,7 @@ void setup() {
   logWifi("RotaryEncoder init");
   // ***************************    PID regulator    **************************
   pidSetpoint = (float)Curr_Temp;
-  Kp=0.7897, Ki=0.0098, Kd=0.0;
+  Kp=0.6897, Ki=0.0051, Kd=0.0;
   // Near-setpoint defaults for inertial heater (can be overridden via WebSocket)
   KpTracking = 0.1892, KiTracking = 0.0004, KdTracking = 0.0;
   twoZonePID = 1;
@@ -409,7 +409,7 @@ void model_loop(void){
     // Переходим в tracking только вблизи уставки при подходе снизу.
     // При перелете (deltaTemp <= 0) не держим минимальную мощность,
     // иначе нагрев не может стабилизироваться.
-    if ((deltaTemp > 0) && (deltaTemp <= switchTemp)) {
+    if (deltaTemp <= switchTemp) {
       if (twoZonePID == 1) {
        TableHeatPID.SetTunings((float)KpTracking, (float)KiTracking, (float)KdTracking);
       } else {
@@ -419,12 +419,7 @@ void model_loop(void){
       State |= STATUS_FLAG_Tracking;
     }
     else {
-    // В разгонной зоне и при перелете разрешаем нулевую мощность.
-      if ((deltaTemp <= 0) && twoZonePID == 1) {
-        TableHeatPID.SetTunings((float)KpTracking, (float)KiTracking, (float)KdTracking);
-      } else {
-        TableHeatPID.SetTunings((float)Kp, (float)Ki, (float)Kd);
-      }
+      TableHeatPID.SetTunings((float)Kp, (float)Ki, (float)Kd);
       TableHeatPID.SetOutputLimits(0, 100); // full range: 0..100%
       State &= ~STATUS_FLAG_Tracking;
     }
@@ -465,10 +460,6 @@ void model_loop(void){
         " set=" + String(Curr_Temp, 1)
       );
       lastPowerLogMs = millis();
-    }
-
-    if (deltaTemp <= 0) {
-      State &= ~STATUS_FLAG_Tracking;
     }
   }
   // counter tPROG step 1 sec

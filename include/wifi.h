@@ -2,8 +2,8 @@
 
 #include "main.h"
 
-#define STA 
-//#define AP 
+//#define STA 
+#define AP 
 #define HTTP_PORT 80
 
 #ifdef STA    
