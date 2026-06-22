@@ -70,6 +70,16 @@ int unitProg;
 int minimize;
 int calibrateTemp = 1;
 
+int8_t State;
+int8_t Current_pos = 2;
+double Temperature, Measured_Temp, valComputePID=0, Curr_Temp=10;
+float pidInput = 0, pidOutput = 0, pidSetpoint = 0;
+
+double coeffTempTable = 0; // температурный коэфициент нагревательного стола
+int tProg;
+int getPower;
+int16_t deltaTemp; 
+
 // SnPb profile: time boundaries, s
 const int SNPB_T_PREHEAT_END  = 200;  // было 140
 const int SNPB_T_REFLOW_END   = 400;  // было 240 — даём 200 сек на разгон
